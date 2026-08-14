@@ -75,13 +75,13 @@ void DumpFromTun(const std::string& interface) {
     char name[255] = {};
     std::strncpy(name, interface.c_str(), sizeof(name) - 1);
 
-    TcpSocket socket{name};
+    TcpSocket socket;
     std::cout << "Listening on " << name << "...\n";
 
     uint8_t buf[kBufferSize] = {};
 
     while (true) {
-        const ssize_t bytes_read = socket.device().tun_read(
+        const ssize_t bytes_read = TunDevice::instance().tun_read(
             reinterpret_cast<char*>(buf), sizeof(buf));
 
         if (bytes_read < 0) {

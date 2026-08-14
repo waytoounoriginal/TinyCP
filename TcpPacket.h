@@ -8,10 +8,18 @@
 #include <cstdint>
 #include <ostream>
 #include <span>
-#include <arpa/inet.h>
+#include "utils/Platform.h"
+#include "utils/Checksum.h"
 
 /** As per RFC 793 Documentation */
-class __attribute__((packed)) TcpHeader {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
+class
+#ifndef _MSC_VER
+__attribute__((packed))
+#endif
+TcpHeader {
 private:
 
     /** The source port */
@@ -207,11 +215,122 @@ public:
         return ntohs(urgent_pointer_);
     }
 
+    /*
+     * Setters.
+     *
+     * These take host byte order values and store them in network
+     * byte order, ready to be written to the wire.
+     */
+
+    /** Sets the source port in host byte order. */
+    void set_source_port(uint16_t port) noexcept {
+        source_port_ = htons(port);
+    }
+
+    /** Sets the destination port in host byte order. */
+    void set_dest_port(uint16_t port) noexcept {
+        dest_port_ = htons(port);
+    }
+
+    /** Sets the sequence number in host byte order. */
+    void set_seq_num(uint32_t seq) noexcept {
+        seq_num_ = htonl(seq);
+    }
+
+    /** Sets the acknowledgement number in host byte order. */
+    void set_ack_num(uint32_t ack) noexcept {
+        ack_num_ = htonl(ack);
+    }
+
+    /** Sets the TCP Data Offset, in 32-bit words. */
+    void set_data_offset(uint8_t words) noexcept {
+        const uint16_t word = ntohs(data_offset_and_reserved_and_control_bits_);
+        data_offset_and_reserved_and_control_bits_ =
+            htons(static_cast<uint16_t>((word & 0x0FFF)
+                                        | ((words & 0xF) << 12)));
+    }
+
+    /** Sets the header length in bytes; must be a multiple of 4. */
+    void set_header_length(uint8_t bytes) noexcept {
+        set_data_offset(bytes / 4);
+    }
+
+    /** Sets the 6 control bits at once, in host byte order. */
+    void set_flags(uint16_t flags) noexcept {
+        const uint16_t word = ntohs(data_offset_and_reserved_and_control_bits_);
+        data_offset_and_reserved_and_control_bits_ =
+            htons(static_cast<uint16_t>((word & 0xFFC0) | (flags & 0x3F)));
+    }
+
+private:
+    /** Sets (or clears) a control bit by its position within the flags. */
+    void set_flag(int bit, bool set) noexcept {
+        const uint16_t word = ntohs(data_offset_and_reserved_and_control_bits_);
+        const uint16_t mask = static_cast<uint16_t>(1u << bit);
+        data_offset_and_reserved_and_control_bits_ = htons(set
+            ? static_cast<uint16_t>(word | mask)
+            : static_cast<uint16_t>(word & ~mask));
+    }
+
+public:
+    void set_urg(bool set) noexcept { set_flag(5, set); }
+    void set_ack(bool set) noexcept { set_flag(4, set); }
+    void set_psh(bool set) noexcept { set_flag(3, set); }
+    void set_rst(bool set) noexcept { set_flag(2, set); }
+    void set_syn(bool set) noexcept { set_flag(1, set); }
+    void set_fin(bool set) noexcept { set_flag(0, set); }
+
+    /** Sets Window in host byte order. */
+    void set_window(uint16_t window) noexcept {
+        this->window_ = htons(window);
+    }
+
+    /** Sets the Checksum in host byte order. */
+    void set_checksum(uint16_t checksum) noexcept {
+        this->checksum_ = htons(checksum);
+    }
+
+    /** Sets Urgent Pointer in host byte order. */
+    void set_urgent_pointer(uint16_t pointer) noexcept {
+        urgent_pointer_ = htons(pointer);
+    }
+
+    /*
+     * Wire serialization.
+     */
+
+    /**
+     * Serializes the header into network-order wire bytes.
+     *
+     * Precondition: out.size() >= 20.
+     */
+    void serialize(std::span<uint8_t> out) const noexcept;
+
+    /**
+     * Computes the RFC 793 header checksum over this header.
+     *
+     * The checksum field is treated as zero for the computation.
+     */
+    uint16_t compute_checksum() const noexcept;
+
+    /**
+     * Computes the full RFC 793 TCP checksum over IPv4 pseudo-header,
+     * TCP header, and payload.
+     *
+     * src_ip_net and dst_ip_net must be in network byte order.
+     */
+    uint16_t compute_checksum(uint32_t src_ip_net, uint32_t dst_ip_net,
+                             std::span<const uint8_t> payload) const noexcept;
+
     friend std::ostream& operator<<(
         std::ostream& os,
         const TcpHeader& header
     );
 };
+
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
 
 static_assert(sizeof(TcpHeader) == 20);
 
@@ -222,7 +341,25 @@ struct TcpPacket {
 
     /** The byte payload. Starts from the end of the TCP header (Data
      * Offset). */
-    std::span<uint8_t> payload;
+    std::span<const uint8_t> payload;
+
+    inline size_t size() const noexcept {
+        return sizeof(TcpHeader) + payload.size();
+    }
 };
+
+/**
+ * Serializes a full datagram (header + payload) into network-order
+ * bytes, automatically computing the full RFC 793 TCP checksum.
+ *
+ * Returns the number of bytes written, or 0 if out is too small.
+ */
+[[nodiscard]] size_t WriteTcpPacket(std::span<uint8_t> out, uint32_t src_ip_net,
+                                    uint32_t dst_ip_net, const TcpPacket& packet);
+
+/**
+ * Serializes a full datagram into network-order bytes using the existing header checksum.
+ */
+[[nodiscard]] size_t WriteTcpPacket(std::span<uint8_t> out, const TcpPacket& packet);
 
 #endif //TCP_FROM_SCRATCH_TCPPACKET_H

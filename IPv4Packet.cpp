@@ -5,9 +5,11 @@
 #include "IPv4Packet.h"
 #include "IPv4PacketView.h"
 
+#include <algorithm>
+#include <cstring>
 #include <iomanip>
 #include <ostream>
-#include <arpa/inet.h>
+#include "utils/Platform.h"
 
 /** Shared dump format for IPv4Header and IPv4PacketView. */
 template <typename Header>
@@ -90,3 +92,35 @@ std::ostream& operator<<(std::ostream& os, const IPv4PacketView& packet) {
     PrintIPv4Header(os, packet);
     return os;
 }
+
+void IPv4Header::serialize(std::span<uint8_t> out) const noexcept {
+    std::memcpy(out.data(), this, sizeof(IPv4Header));
+}
+
+uint16_t IPv4Header::compute_checksum() const noexcept {
+    uint8_t wire[20];
+    serialize(wire);
+    wire[10] = 0;
+    wire[11] = 0;
+    return OnesComplementChecksum(wire, sizeof(wire));
+}
+
+size_t WriteIPv4Packet(std::span<uint8_t> out, const IPv4Packet& packet) {
+    const size_t header_len = packet.header.header_length() > 0 ? packet.header.header_length() : sizeof(IPv4Header);
+    const size_t total = header_len + packet.payload.size();
+    if (out.size() < total) {
+        return 0;
+    }
+
+    IPv4Header header = packet.header;
+    header.set_total_length(static_cast<uint16_t>(total));
+    header.set_checksum(header.compute_checksum());
+
+    uint8_t wire[20];
+    header.serialize(wire);
+    std::copy_n(wire, sizeof(wire), out.data());
+    std::copy_n(packet.payload.data(), packet.payload.size(),
+                out.data() + header_len);
+    return total;
+}
+

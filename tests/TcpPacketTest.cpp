@@ -235,11 +235,40 @@ TEST(TcpPacketTest, PayloadStartsAtEndOfHeader) {
     TcpHeader& header = *reinterpret_cast<TcpHeader*>(buf);
     TcpPacket packet{
         header,
-        std::span<uint8_t>(buf + header.header_length(),
-                           sizeof(buf) - header.header_length()),
+        std::span<const uint8_t>(buf + header.header_length(),
+                                 sizeof(buf) - header.header_length()),
     };
 
     EXPECT_EQ(packet.payload.size(), 6);
     EXPECT_EQ(packet.payload[0], 0xDE);
     EXPECT_EQ(packet.payload[5], 0x42);
+}
+
+TEST(TcpPacketTest, ComputesFullPseudoHeaderChecksum) {
+    // 10.0.0.1 (0x0A000001) -> 10.0.0.2 (0x0A000002) in network order
+    const uint32_t src_ip = htonl(0x0A000001);
+    const uint32_t dst_ip = htonl(0x0A000002);
+
+    TcpHeader header{};
+    header.set_source_port(1234);
+    header.set_dest_port(80);
+    header.set_seq_num(100);
+    header.set_ack_num(0);
+    header.set_data_offset(5);
+    header.set_syn(true);
+
+    const uint8_t payload[4] = {0x11, 0x22, 0x33, 0x44};
+    TcpPacket packet{header, std::span<const uint8_t>(payload, 4)};
+
+    uint8_t out[128] = {};
+    size_t written = WriteTcpPacket(out, src_ip, dst_ip, packet);
+    EXPECT_EQ(written, 24);
+
+    // Verify written TCP checksum at offset 16-17 is non-zero and valid
+    uint16_t written_chk = static_cast<uint16_t>((out[16] << 8) | out[17]);
+    EXPECT_NE(written_chk, 0);
+
+    // Verifying checksum over (pseudo-header + header + payload) with written checksum yields 0
+    uint16_t recomputed = ComputeTcpChecksum(src_ip, dst_ip, out, 20, out + 20, 4);
+    EXPECT_EQ(recomputed, 0);
 }

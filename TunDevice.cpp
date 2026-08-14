@@ -4,6 +4,7 @@
 
 #include "TunDevice.h"
 
+#ifndef _WIN32
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -43,5 +44,9 @@ int TunDevice::tun_alloc(char *dev) {
 
     strcpy(dev, ifr.ifr_name);
     return fd;
-
 }
+#else
+int TunDevice::tun_alloc(char* /*dev*/) {
+    return -1;
+}
+#endif

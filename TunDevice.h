@@ -5,7 +5,7 @@
 #ifndef TCP_FROM_SCRATCH_TUNREADER_H
 #define TCP_FROM_SCRATCH_TUNREADER_H
 #include <cstddef>
-#include <unistd.h>
+#include "utils/Platform.h"
 
 using file_descriptor_t = int;
 
@@ -27,13 +27,13 @@ public:
     }
 
     /** Wrapper of read over the TUN file descriptor */
-    inline ssize_t tun_read(char* buf, size_t len) const {
-        return read(fd, buf, len);
+    inline size_t tun_read(char* buf, size_t len) const {
+        return static_cast<size_t>(read(fd, buf, len));
     }
 
     /** Wrapper of write over the TUN file descriptor */
-    inline ssize_t tun_write(const char* buf, size_t len) const {
-        return write(fd, buf, len);
+    inline size_t tun_write(const char* buf, size_t len) const {
+        return static_cast<size_t>(write(fd, buf, len));
     }
 
     TunDevice(const TunDevice&) = delete;
@@ -43,7 +43,10 @@ public:
 
 private:
     /* Private: only instance() may create the device. */
-    TunDevice() : fd{tun_alloc("tun0")} {}
+    TunDevice() {
+        char name[] = "tun0";
+        fd = tun_alloc(name);
+    }
 
     file_descriptor_t fd;
 

@@ -3,11 +3,14 @@
 //
 
 #include "TcpPacket.h"
+
+#include <cstring>
+
 #include "TcpPacketView.h"
 
 #include <iomanip>
 #include <ostream>
-#include <arpa/inet.h>
+#include "utils/Platform.h"
 
 /** Shared dump format for TcpHeader and TcpPacketView. */
 template <typename Header>
@@ -96,3 +99,73 @@ std::ostream& operator<<(std::ostream& os, const TcpPacketView& segment) {
     PrintTcpHeader(os, segment);
     return os;
 }
+
+void TcpHeader::serialize(std::span<uint8_t> out) const noexcept {
+    std::memcpy(out.data(), this, sizeof(TcpHeader));
+}
+
+uint16_t TcpHeader::compute_checksum() const noexcept {
+    uint8_t wire[20];
+    serialize(wire);
+    wire[16] = 0;
+    wire[17] = 0;
+    return OnesComplementChecksum(wire, sizeof(wire));
+}
+
+uint16_t TcpHeader::compute_checksum(uint32_t src_ip_net, uint32_t dst_ip_net,
+                             std::span<const uint8_t> payload) const noexcept {
+    uint8_t wire[20];
+    serialize(wire);
+    return ComputeTcpChecksum(src_ip_net, dst_ip_net, wire, sizeof(wire),
+                              payload.data(), payload.size());
+}
+
+size_t WriteTcpPacket(std::span<uint8_t> out, uint32_t src_ip_net,
+                        uint32_t dst_ip_net, const TcpPacket& packet) {
+    const size_t header_len = packet.header.header_length() > 0 ? packet.header.header_length() : sizeof(TcpHeader);
+    const size_t total = header_len + packet.payload.size();
+    if (out.size() < total) {
+        return 0;
+    }
+
+    TcpHeader header = packet.header;
+    if (header.data_offset() == 0) {
+        header.set_data_offset(5);
+    }
+    header.set_checksum(0);
+
+    const uint16_t chk = header.compute_checksum(src_ip_net, dst_ip_net, packet.payload);
+    header.set_checksum(chk);
+
+    uint8_t wire[20];
+    header.serialize(wire);
+    std::copy_n(wire, sizeof(wire), out.data());
+    if (!packet.payload.empty()) {
+        std::copy_n(packet.payload.data(), packet.payload.size(),
+                    out.data() + header_len);
+    }
+    return total;
+}
+
+size_t WriteTcpPacket(std::span<uint8_t> out, const TcpPacket& packet) {
+    const size_t header_len = packet.header.header_length() > 0 ? packet.header.header_length() : sizeof(TcpHeader);
+    const size_t total = header_len + packet.payload.size();
+    if (out.size() < total) {
+        return 0;
+    }
+
+    TcpHeader header = packet.header;
+    if (header.data_offset() == 0) {
+        header.set_data_offset(5);
+    }
+
+    uint8_t wire[20];
+    header.serialize(wire);
+    std::copy_n(wire, sizeof(wire), out.data());
+    if (!packet.payload.empty()) {
+        std::copy_n(packet.payload.data(), packet.payload.size(),
+                    out.data() + header_len);
+    }
+    return total;
+}
+

@@ -6,7 +6,7 @@
 #include <optional>
 #include <ostream>
 #include <span>
-#include <arpa/inet.h>
+#include "utils/Platform.h"
 
 /**
  * Non-owning view of a TCP segment (RFC 793).

@@ -5,10 +5,18 @@
 #include <optional>
 #include <ostream>
 #include <span>
-#include <arpa/inet.h>
+#include "utils/Platform.h"
+#include "utils/Checksum.h"
 
 /** As per RFC 791 Documentation */
-class __attribute__((packed)) IPv4Header {
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
+class
+#ifndef _MSC_VER
+__attribute__((packed))
+#endif
+IPv4Header {
 private:
     /**
      * The first 4 bits are the Version field, which indicates the
@@ -203,11 +211,124 @@ public:
         return ntohl(destination_address_);
     }
 
+    /*
+     * Setters.
+     *
+     * These take host byte order values and store them in network
+     * byte order, ready to be written to the wire.
+     */
+
+    /** Sets the IP version; preserves the header length. */
+    void set_version(uint8_t version) noexcept {
+        version_ihl_ = static_cast<uint8_t>(
+            (version_ihl_ & 0x0F) | ((version & 0x0F) << 4)
+        );
+    }
+
+    /** Sets the Internet Header Length, in 32-bit words. */
+    void set_ihl(uint8_t ihl) noexcept {
+        version_ihl_ = static_cast<uint8_t>(
+            (version_ihl_ & 0xF0) | (ihl & 0x0F)
+        );
+    }
+
+    /** Sets the header length in bytes; must be a multiple of 4. */
+    void set_header_length(uint8_t bytes) noexcept {
+        set_ihl(bytes / 4);
+    }
+
+    void set_type_of_service(uint8_t type_of_service) noexcept {
+        type_of_service_ = type_of_service;
+    }
+
+    /** Sets Total Length in host byte order. */
+    void set_total_length(uint16_t total_length) noexcept {
+        total_length_ = htons(total_length);
+    }
+
+    /** Sets Identification in host byte order. */
+    void set_identification(uint16_t identification) noexcept {
+        identification_ = htons(identification);
+    }
+
+    /** Sets the 3-bit Flags field; preserves the fragment offset. */
+    void set_flags(uint8_t flags) noexcept {
+        const uint16_t word = ntohs(flags_fragment_offset_);
+        flags_fragment_offset_ =
+            htons(static_cast<uint16_t>((word & 0x1FFF)
+                                        | ((flags & 0x7) << 13)));
+    }
+
+    /** Sets Fragment Offset in host byte order; preserves the flags. */
+    void set_fragment_offset(uint16_t offset) noexcept {
+        const uint16_t word = ntohs(flags_fragment_offset_);
+        flags_fragment_offset_ =
+            htons(static_cast<uint16_t>((word & 0xE000)
+                                        | (offset & 0x1FFF)));
+    }
+
+    void set_ttl(uint8_t ttl) noexcept {
+        ttl_ = ttl;
+    }
+
+    void set_protocol(uint8_t protocol) noexcept {
+        protocol_ = protocol;
+    }
+
+    /** Sets the Checksum in host byte order. */
+    void set_checksum(uint16_t checksum) noexcept {
+        checksum_ = htons(checksum);
+    }
+
+    /** Sets the source address in host byte order. */
+    void set_source_address(uint32_t address) noexcept {
+        source_address_ = htonl(address);
+    }
+
+    /** Sets the source address from a dotted-quad string. */
+    void set_source_address(const char* address) noexcept {
+        inet_pton(AF_INET, address, &source_address_);
+    }
+
+    /** Sets the destination address in host byte order. */
+    void set_destination_address(uint32_t address) noexcept {
+        destination_address_ = htonl(address);
+    }
+
+    /** Sets the destination address from a dotted-quad string. */
+    void set_destination_address(const char* address) noexcept {
+        inet_pton(AF_INET, address, &destination_address_);
+    }
+
+    /*
+     * Wire serialization.
+     */
+
+    /**
+     * Serializes the header into network-order wire bytes.
+     *
+     * Precondition: out.size() >= 20.
+     */
+    void serialize(std::span<uint8_t> out) const noexcept;
+
+    /**
+     * Computes the RFC 791 header checksum over this header.
+     *
+     * The checksum field is treated as zero for the computation, as
+     * per the spec. Call set_checksum() with the result before
+     * sending.
+     */
+    uint16_t compute_checksum() const noexcept;
+
     friend std::ostream& operator<<(
         std::ostream& os,
         const IPv4Header& header
     );
 };
+
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
 
 static_assert(sizeof(IPv4Header) == 20);
 
@@ -217,8 +338,21 @@ struct IPv4Packet {
     /** The packet's header */
     IPv4Header header;
 
-    /** The byte payload. Starts from the end of the header. */
-    std::span<uint8_t> payload;
+    /** The byte payload. Starts from the end of the IHL of the header. */
+    std::span<const uint8_t> payload;
+
+    inline size_t size() const noexcept {
+        return sizeof(IPv4Header) + payload.size();
+    }
 };
+
+/**
+ * Serializes a full datagram (header + payload) into network-order
+ * bytes.
+ *
+ * Automatically updates total_length and compute_checksum before serializing.
+ * Returns the number of bytes written, or 0 if out is too small.
+ */
+[[nodiscard]] size_t WriteIPv4Packet(std::span<uint8_t> out, const IPv4Packet& packet);
 
 #endif // TCP_FROM_SCRATCH_IPPACKET_H
