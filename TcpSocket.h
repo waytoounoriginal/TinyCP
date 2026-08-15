@@ -19,13 +19,16 @@
 
 class TcpSocket {
 private:
+    TcpStack& stack_;
     /** Access to the block owned by the TcpStack */
     TcbSharedResource tcb_;
 
 public:
+    explicit TcpSocket(TcpStack& stack) noexcept : stack_(stack) {}
+
     /** Returns the connection state, per RFC 793. */
     TcpState state() const noexcept {
-        return tcb_->current_state;
+        return tcb_ ? tcb_->current_state : TcpState::CLOSED;
     }
 
     TcbSharedResource tcb() const noexcept {
@@ -33,43 +36,19 @@ public:
     }
 
     /** Registers an entry in the demultiplexer */
-    inline void bind(IPv4Address addr) noexcept {
-        Logger::instance().info() << "Binding socket to port: " << addr.port;
-
-        tcb_ = TcpStack::instance().bind_socket(addr);
-    };
+    void bind(IPv4Address addr) noexcept;
 
     /** Puts the socket in listening mode */
-    inline void listen() noexcept {
-        if (tcb_->current_state != TcpState::CLOSED) {
-            Logger::instance().warn()
-                << "Trying to LISTEN, but socket is "
-            << TCP_STATE_TO_STRING(tcb_->current_state);
-            return;
-        }
-
-        Logger::instance().info() << "Moving state to LISTEN";
-
-        tcb_->current_state = TcpState::LISTEN;
-    }
+    void listen() noexcept;
 
     /** Initialize the connection */
-    inline void connect(IPv4Address addr) noexcept {
-    }
+    void connect(IPv4Address addr) noexcept;
 
     void accept();
 
-    inline size_t send(std::span<const uint8_t> data) const noexcept {
-        // Write into the send buffer and notify the stack
-        auto sent_data = tcb_->send_buffer.write(data);
-        TcpStack::instance().add_dirty_tcb(tcb_);
+    size_t send(std::span<const uint8_t> data) const noexcept;
 
-        return sent_data;
-    }
-
-    inline size_t recv(std::span<uint8_t> data) const noexcept {
-        return tcb_->recv_buffer.read(data);
-    }
+    size_t recv(std::span<uint8_t> data) const noexcept;
 };
 
 

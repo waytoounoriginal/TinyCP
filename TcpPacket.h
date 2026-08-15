@@ -334,6 +334,8 @@ public:
 
 static_assert(sizeof(TcpHeader) == 20);
 
+#include "IPv4.h"
+
 /** The TCP segment structure */
 struct TcpPacket {
     /** The segment's header */
@@ -346,20 +348,32 @@ struct TcpPacket {
     inline size_t size() const noexcept {
         return sizeof(TcpHeader) + payload.size();
     }
+
+    /**
+     * Serializes this full datagram (header + payload) into network-order
+     * bytes, automatically computing the full RFC 793 TCP checksum.
+     *
+     * Returns the number of bytes written, or 0 if out is too small.
+     */
+    [[nodiscard]] size_t write(std::span<uint8_t> out, IPv4Address src, IPv4Address dst) const;
+    [[nodiscard]] size_t write(std::span<uint8_t> out, uint32_t src_ip_net, uint32_t dst_ip_net) const;
+
+    /**
+     * Serializes this full datagram into network-order bytes using the existing header checksum.
+     */
+    [[nodiscard]] size_t write(std::span<uint8_t> out) const;
 };
 
-/**
- * Serializes a full datagram (header + payload) into network-order
- * bytes, automatically computing the full RFC 793 TCP checksum.
- *
- * Returns the number of bytes written, or 0 if out is too small.
- */
-[[nodiscard]] size_t WriteTcpPacket(std::span<uint8_t> out, uint32_t src_ip_net,
-                                    uint32_t dst_ip_net, const TcpPacket& packet);
+inline size_t WriteTcpPacket(std::span<uint8_t> out, IPv4Address src, IPv4Address dst, const TcpPacket& packet) {
+    return packet.write(out, src, dst);
+}
 
-/**
- * Serializes a full datagram into network-order bytes using the existing header checksum.
- */
-[[nodiscard]] size_t WriteTcpPacket(std::span<uint8_t> out, const TcpPacket& packet);
+inline size_t WriteTcpPacket(std::span<uint8_t> out, uint32_t src_ip_net, uint32_t dst_ip_net, const TcpPacket& packet) {
+    return packet.write(out, src_ip_net, dst_ip_net);
+}
+
+inline size_t WriteTcpPacket(std::span<uint8_t> out, const TcpPacket& packet) {
+    return packet.write(out);
+}
 
 #endif //TCP_FROM_SCRATCH_TCPPACKET_H

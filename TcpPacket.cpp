@@ -120,50 +120,54 @@ uint16_t TcpHeader::compute_checksum(uint32_t src_ip_net, uint32_t dst_ip_net,
                               payload.data(), payload.size());
 }
 
-size_t WriteTcpPacket(std::span<uint8_t> out, uint32_t src_ip_net,
-                        uint32_t dst_ip_net, const TcpPacket& packet) {
-    const size_t header_len = packet.header.header_length() > 0 ? packet.header.header_length() : sizeof(TcpHeader);
-    const size_t total = header_len + packet.payload.size();
+size_t TcpPacket::write(std::span<uint8_t> out, IPv4Address src, IPv4Address dst) const {
+    return write(out, htonl(src.address), htonl(dst.address));
+}
+
+size_t TcpPacket::write(std::span<uint8_t> out, uint32_t src_ip_net,
+                       uint32_t dst_ip_net) const {
+    const size_t header_len = header.header_length() > 0 ? header.header_length() : sizeof(TcpHeader);
+    const size_t total = header_len + payload.size();
     if (out.size() < total) {
         return 0;
     }
 
-    TcpHeader header = packet.header;
-    if (header.data_offset() == 0) {
-        header.set_data_offset(5);
+    TcpHeader hdr = header;
+    if (hdr.data_offset() == 0) {
+        hdr.set_data_offset(5);
     }
-    header.set_checksum(0);
+    hdr.set_checksum(0);
 
-    const uint16_t chk = header.compute_checksum(src_ip_net, dst_ip_net, packet.payload);
-    header.set_checksum(chk);
+    const uint16_t chk = hdr.compute_checksum(src_ip_net, dst_ip_net, payload);
+    hdr.set_checksum(chk);
 
     uint8_t wire[20];
-    header.serialize(wire);
+    hdr.serialize(wire);
     std::copy_n(wire, sizeof(wire), out.data());
-    if (!packet.payload.empty()) {
-        std::copy_n(packet.payload.data(), packet.payload.size(),
+    if (!payload.empty()) {
+        std::copy_n(payload.data(), payload.size(),
                     out.data() + header_len);
     }
     return total;
 }
 
-size_t WriteTcpPacket(std::span<uint8_t> out, const TcpPacket& packet) {
-    const size_t header_len = packet.header.header_length() > 0 ? packet.header.header_length() : sizeof(TcpHeader);
-    const size_t total = header_len + packet.payload.size();
+size_t TcpPacket::write(std::span<uint8_t> out) const {
+    const size_t header_len = header.header_length() > 0 ? header.header_length() : sizeof(TcpHeader);
+    const size_t total = header_len + payload.size();
     if (out.size() < total) {
         return 0;
     }
 
-    TcpHeader header = packet.header;
-    if (header.data_offset() == 0) {
-        header.set_data_offset(5);
+    TcpHeader hdr = header;
+    if (hdr.data_offset() == 0) {
+        hdr.set_data_offset(5);
     }
 
     uint8_t wire[20];
-    header.serialize(wire);
+    hdr.serialize(wire);
     std::copy_n(wire, sizeof(wire), out.data());
-    if (!packet.payload.empty()) {
-        std::copy_n(packet.payload.data(), packet.payload.size(),
+    if (!payload.empty()) {
+        std::copy_n(payload.data(), payload.size(),
                     out.data() + header_len);
     }
     return total;

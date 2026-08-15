@@ -7,16 +7,17 @@
 #include "TcpStack.h"
 
 int main() {
-    auto& stack = TcpStack::instance();
+    TunDevice tun{"tun0"};
+    TcpStack stack{tun};
 
     IPv4Address addr_a{ 0x0A000002 /* 10.0.0.2 */, 8080 };
     IPv4Address addr_b{ 0x0A000003 /* 10.0.0.3 */, 9090 };
 
     // 1. Create and bind Socket A and Socket B
-    TcpSocket socket_a;
+    TcpSocket socket_a{stack};
     socket_a.bind(addr_a);
 
-    TcpSocket socket_b;
+    TcpSocket socket_b{stack};
     socket_b.bind(addr_b);
 
     // 2. Register connection 4-tuples in TcpStack

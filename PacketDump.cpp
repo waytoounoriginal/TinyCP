@@ -72,21 +72,19 @@ void DumpFromFile(const std::string& path) {
 
 /** Reads packets from the TUN device until interrupted. */
 void DumpFromTun(const std::string& interface) {
-    char name[255] = {};
-    std::strncpy(name, interface.c_str(), sizeof(name) - 1);
-
-    TcpSocket socket;
-    std::cout << "Listening on " << name << "...\n";
+    TunDevice tun{interface.c_str()};
+    TcpStack stack{tun};
+    TcpSocket socket{stack};
+    std::cout << "Listening on " << interface << "...\n";
 
     uint8_t buf[kBufferSize] = {};
 
     while (true) {
-        const ssize_t bytes_read = TunDevice::instance().tun_read(
+        const size_t bytes_read = tun.tun_read(
             reinterpret_cast<char*>(buf), sizeof(buf));
 
-        if (bytes_read < 0) {
-            perror("tun_read");
-            break;
+        if (bytes_read == 0) {
+            continue;
         }
 
         std::cout << "Read " << bytes_read << " bytes\n";

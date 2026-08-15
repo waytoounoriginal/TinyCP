@@ -105,21 +105,21 @@ uint16_t IPv4Header::compute_checksum() const noexcept {
     return OnesComplementChecksum(wire, sizeof(wire));
 }
 
-size_t WriteIPv4Packet(std::span<uint8_t> out, const IPv4Packet& packet) {
-    const size_t header_len = packet.header.header_length() > 0 ? packet.header.header_length() : sizeof(IPv4Header);
-    const size_t total = header_len + packet.payload.size();
+size_t IPv4Packet::write(std::span<uint8_t> out) const {
+    const size_t header_len = header.header_length() > 0 ? header.header_length() : sizeof(IPv4Header);
+    const size_t total = header_len + payload.size();
     if (out.size() < total) {
         return 0;
     }
 
-    IPv4Header header = packet.header;
-    header.set_total_length(static_cast<uint16_t>(total));
-    header.set_checksum(header.compute_checksum());
+    IPv4Header hdr = header;
+    hdr.set_total_length(static_cast<uint16_t>(total));
+    hdr.set_checksum(hdr.compute_checksum());
 
     uint8_t wire[20];
-    header.serialize(wire);
+    hdr.serialize(wire);
     std::copy_n(wire, sizeof(wire), out.data());
-    std::copy_n(packet.payload.data(), packet.payload.size(),
+    std::copy_n(payload.data(), payload.size(),
                 out.data() + header_len);
     return total;
 }

@@ -22,6 +22,16 @@ uint16_t OnesComplementChecksum(const uint8_t* data, size_t length) {
     return static_cast<uint16_t>(~sum & 0xFFFF);
 }
 
+#include "utils/Platform.h"
+
+uint16_t ComputeTcpChecksum(IPv4Address src, IPv4Address dst,
+                           const uint8_t* header_bytes, size_t header_len,
+                           const uint8_t* payload_bytes, size_t payload_len) {
+    return ComputeTcpChecksum(htonl(src.address), htonl(dst.address),
+                              header_bytes, header_len,
+                              payload_bytes, payload_len);
+}
+
 uint16_t ComputeTcpChecksum(uint32_t src_ip_net, uint32_t dst_ip_net,
                            const uint8_t* header_bytes, size_t header_len,
                            const uint8_t* payload_bytes, size_t payload_len) {

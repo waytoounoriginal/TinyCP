@@ -261,7 +261,7 @@ TEST(TcpPacketTest, ComputesFullPseudoHeaderChecksum) {
     TcpPacket packet{header, std::span<const uint8_t>(payload, 4)};
 
     uint8_t out[128] = {};
-    size_t written = WriteTcpPacket(out, src_ip, dst_ip, packet);
+    size_t written = packet.write(out, src_ip, dst_ip);
     EXPECT_EQ(written, 24);
 
     // Verify written TCP checksum at offset 16-17 is non-zero and valid

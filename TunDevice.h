@@ -20,21 +20,14 @@ using file_descriptor_t = int;
  */
 class TunDevice {
 public:
-    /** Returns the one TUN device, creating it on first use. */
-    inline static TunDevice& instance() {
-        static TunDevice device{};
-        return device;
-    }
+    explicit TunDevice(const char* dev_name = "tun0");
+    ~TunDevice();
 
     /** Wrapper of read over the TUN file descriptor */
-    inline size_t tun_read(char* buf, size_t len) const {
-        return static_cast<size_t>(read(fd, buf, len));
-    }
+    size_t tun_read(char* buf, size_t len) const;
 
     /** Wrapper of write over the TUN file descriptor */
-    inline size_t tun_write(const char* buf, size_t len) const {
-        return static_cast<size_t>(write(fd, buf, len));
-    }
+    size_t tun_write(const char* buf, size_t len) const;
 
     TunDevice(const TunDevice&) = delete;
     TunDevice& operator=(const TunDevice&) = delete;
@@ -42,13 +35,7 @@ public:
     TunDevice& operator=(TunDevice&&) = delete;
 
 private:
-    /* Private: only instance() may create the device. */
-    TunDevice() {
-        char name[] = "tun0";
-        fd = tun_alloc(name);
-    }
-
-    file_descriptor_t fd;
+    file_descriptor_t fd{-1};
 
     file_descriptor_t tun_alloc(char* dev);
 };

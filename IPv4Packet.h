@@ -344,15 +344,17 @@ struct IPv4Packet {
     inline size_t size() const noexcept {
         return sizeof(IPv4Header) + payload.size();
     }
+
+    /**
+     * Serializes this full datagram (header + payload) into network-order bytes.
+     * Automatically updates total_length and compute_checksum before serializing.
+     * Returns the number of bytes written, or 0 if out is too small.
+     */
+    [[nodiscard]] size_t write(std::span<uint8_t> out) const;
 };
 
-/**
- * Serializes a full datagram (header + payload) into network-order
- * bytes.
- *
- * Automatically updates total_length and compute_checksum before serializing.
- * Returns the number of bytes written, or 0 if out is too small.
- */
-[[nodiscard]] size_t WriteIPv4Packet(std::span<uint8_t> out, const IPv4Packet& packet);
+inline size_t WriteIPv4Packet(std::span<uint8_t> out, const IPv4Packet& packet) {
+    return packet.write(out);
+}
 
 #endif // TCP_FROM_SCRATCH_IPPACKET_H
