@@ -167,6 +167,95 @@ size_t TcpStack::send_control_packet_(const TcbSharedResource &tcb, uint8_t syn,
     return write_packet_(tcb->src_address, tcb->dst_address, packet);
 }
 
+size_t TcpStack::handle_passive_open_syn_(const IPv4Address& src, const IPv4Address& dst, const TcpPacketView& packet) noexcept {
+    std::lock_guard lock(mutex);
+    auto listener_it = tcp_listeners_.find(dst.port);
+    if (listener_it != tcp_listeners_.end() && packet.syn() && !packet.ack()) {
+        auto listener_tcb = listener_it->second;
+
+        Logger::instance().info() << "[TcpStack] [1/3] Passive Open: Received SYN from " << src.port
+                                  << " -> Local Port " << dst.port
+                                  << " (SEQ=" << packet.seq_num_ntoh() << ")";
+
+        // Allocate child TCB for incoming connection
+        auto child_tcb = std::make_shared<TransmissionControlBlock>(TcpState::SYN_RECEIVED, dst, src);
+        child_tcb->RCV.IRS = packet.seq_num_ntoh();
+        child_tcb->RCV.NXT = child_tcb->RCV.IRS + 1;
+        child_tcb->SND.ISS = generate_random_uint32();
+        child_tcb->SND.NXT = child_tcb->SND.ISS + 1;
+
+        // Register connection 4-tuple (src = remote, dst = local)
+        tcp_connections_[ConnectionKey{src, dst}] = child_tcb;
+
+        Logger::instance().info() << "[TcpStack] [2/3] Responding with SYN-ACK to " << src.port
+                                  << " (ISS=" << child_tcb->SND.ISS << ", ACK=" << child_tcb->RCV.NXT << ")";
+
+        // Send SYN-ACK
+        return send_control_packet_(child_tcb, /*syn=*/1, /*ack=*/1, /*rst=*/0, child_tcb->SND.ISS, child_tcb->RCV.NXT);
+    }
+    return 0;
+}
+
+size_t TcpStack::handle_syn_sent_state_(const TcbSharedResource& tcb, const IPv4Address& src, const TcpPacketView& packet) noexcept {
+    if (!(packet.syn() && packet.ack())) return 0;
+
+    if (packet.ack_num_ntoh() != tcb->SND.NXT) {
+        Logger::instance().warn() << "[TcpStack] SYN_SENT received invalid ACK number: " << packet.ack_num_ntoh()
+                                  << " (expected " << tcb->SND.NXT << ")";
+        return 0;
+    }
+
+    Logger::instance().info() << "[TcpStack] [2/3] Client received SYN-ACK from " << src.port
+                              << ". Transitioning state SYN_SENT -> ESTABLISHED.";
+
+    tcb->RCV.IRS = packet.seq_num_ntoh();
+    tcb->RCV.NXT = tcb->RCV.IRS + 1;
+    tcb->SND.UNA = packet.ack_num_ntoh();
+    tcb->set_state(TcpState::ESTABLISHED);
+
+    Logger::instance().info() << "[TcpStack] [3/3] Sending final ACK to " << src.port;
+
+    // Send the final ack
+    return send_control_packet_(tcb, /*syn=*/0, /*ack=*/1, /*rst=*/0, tcb->SND.NXT, tcb->RCV.NXT);
+}
+
+size_t TcpStack::handle_syn_received_state_(const TcbSharedResource& tcb, const IPv4Address& src, const TcpPacketView& packet) noexcept {
+    if (packet.syn() || !packet.ack()) return 0;
+
+    if (packet.ack_num_ntoh() != tcb->SND.NXT) {
+        Logger::instance().warn() << "[TcpStack] SYN_RECEIVED received invalid ACK number: " << packet.ack_num_ntoh()
+                                  << " (expected " << tcb->SND.NXT << ")";
+        return 0;
+    }
+
+    Logger::instance().info() << "[TcpStack] [3/3] Server received final ACK from " << src.port
+                              << ". Handshake complete! Transitioning SYN_RECEIVED -> ESTABLISHED.";
+
+    tcb->set_state(TcpState::ESTABLISHED);
+
+    // Find sender and push to accept queue
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto sender_it = tcp_listeners_.find(tcb->src_address.port);
+        if (sender_it != tcp_listeners_.end()) {
+            auto listener_tcb = sender_it->second;
+            {
+                std::lock_guard<std::mutex> lk(listener_tcb->state_mutex);
+                listener_tcb->accept_queue.push(tcb);
+            }
+            listener_tcb->state_cv.notify_all();
+        }
+    }
+    return 0;
+}
+
+size_t TcpStack::handle_established_state_(const TcbSharedResource& tcb, const TcpPacketView& packet) noexcept {
+    if (packet.payload().size() > 0) {
+        return tcb->recv_buffer.write(packet.payload());
+    }
+    return 0;
+}
+
 size_t TcpStack::process_incoming_packet_(std::span<const uint8_t> buffer) noexcept {
     IPv4PacketView tmp(buffer);
     if (!tmp.valid()) return 0;
@@ -180,94 +269,21 @@ size_t TcpStack::process_incoming_packet_(std::span<const uint8_t> buffer) noexc
     auto tcb = find_connections_tcb_(src, dst);
 
     if (!tcb) {
-        // Check listening socket table for passive open (SYN)
-        std::lock_guard lock(mutex);
-        auto listener_it = tcp_listeners_.find(dst.port);
-        if (listener_it != tcp_listeners_.end() && packet.syn() && !packet.ack()) {
-            auto listener_tcb = listener_it->second;
-
-            Logger::instance().info() << "[TcpStack] [1/3] Passive Open: Received SYN from " << src.port
-                                      << " -> Local Port " << dst.port
-                                      << " (SEQ=" << packet.seq_num_ntoh() << ")";
-
-            // Allocate child TCB for incoming connection
-            auto child_tcb = std::make_shared<TransmissionControlBlock>(TcpState::SYN_RECEIVED, dst, src);
-            child_tcb->RCV.IRS = packet.seq_num_ntoh();
-            child_tcb->RCV.NXT = child_tcb->RCV.IRS + 1;
-            child_tcb->SND.ISS = generate_random_uint32();
-            child_tcb->SND.NXT = child_tcb->SND.ISS + 1;
-
-            // Register connection 4-tuple (src = remote, dst = local)
-            tcp_connections_[ConnectionKey{src, dst}] = child_tcb;
-
-            Logger::instance().info() << "[TcpStack] [2/3] Responding with SYN-ACK to " << src.port
-                                      << " (ISS=" << child_tcb->SND.ISS << ", ACK=" << child_tcb->RCV.NXT << ")";
-
-            // Send SYN-ACK
-            return send_control_packet_(child_tcb, /*syn=*/1, /*ack=*/1, /*rst=*/0, child_tcb->SND.ISS, child_tcb->RCV.NXT);
-        }
-        return 0;
+        return handle_passive_open_syn_(src, dst, packet);
     }
 
-    // Handle the different states
+    // Dispatch to modular state machine handlers
     switch (tcb->current_state) {
         case SYN_SENT:
-            // check that the ACK matches
-            if (!(packet.syn() && packet.ack())) break;
-
-            if (packet.ack_num_ntoh() != tcb->SND.NXT) {
-                Logger::instance().warn() << "[TcpStack] SYN_SENT received invalid ACK number: " << packet.ack_num_ntoh()
-                                          << " (expected " << tcb->SND.NXT << ")";
-                break;
-            }
-
-            Logger::instance().info() << "[TcpStack] [2/3] Client received SYN-ACK from " << src.port
-                                      << ". Transitioning state SYN_SENT -> ESTABLISHED.";
-
-            tcb->RCV.IRS = packet.seq_num_ntoh();
-            tcb->RCV.NXT = tcb->RCV.IRS + 1;
-            tcb->SND.UNA = packet.ack_num_ntoh();
-            tcb->set_state(TcpState::ESTABLISHED);
-
-            Logger::instance().info() << "[TcpStack] [3/3] Sending final ACK to " << src.port;
-
-            // Send the final ack
-            return send_control_packet_(tcb, /*syn=*/0, /*ack=*/1, /*rst=*/0, tcb->SND.NXT, tcb->RCV.NXT);
+            return handle_syn_sent_state_(tcb, src, packet);
 
         case SYN_RECEIVED:
-            // Handle receiving the ack from the sender
-            if (packet.syn() || !packet.ack()) break;
+            return handle_syn_received_state_(tcb, src, packet);
 
-            if (packet.ack_num_ntoh() != tcb->SND.NXT) {
-                Logger::instance().warn() << "[TcpStack] SYN_RECEIVED received invalid ACK number: " << packet.ack_num_ntoh()
-                                          << " (expected " << tcb->SND.NXT << ")";
-                break;
-            }
-
-            Logger::instance().info() << "[TcpStack] [3/3] Server received final ACK from " << src.port
-                                      << ". Handshake complete! Transitioning SYN_RECEIVED -> ESTABLISHED.";
-
-            tcb->set_state(TcpState::ESTABLISHED);
-
-            // Find sender and push to accept queue
-            {
-                std::lock_guard<std::mutex> lock(mutex);
-                auto sender_it = tcp_listeners_.find(tcb->src_address.port);
-                if (sender_it != tcp_listeners_.end()) {
-                    auto listener_tcb = sender_it->second;
-                    {
-                        std::lock_guard<std::mutex> lk(listener_tcb->state_mutex);
-                        listener_tcb->accept_queue.push(tcb);
-                    }
-                    listener_tcb->state_cv.notify_all();
-                }
-            }
-
-            break;
+        case ESTABLISHED:
+            return handle_established_state_(tcb, packet);
 
         default:
-            // todo: proper sending logic
-            tcb->recv_buffer.write(packet.payload());
             break;
     }
 

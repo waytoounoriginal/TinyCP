@@ -97,6 +97,12 @@ private:
     size_t send_control_packet_(const TcbSharedResource &tcb, uint8_t syn, uint8_t ack, uint8_t rst, uint32_t seq_num,
                                 uint32_t ack_num, uint16_t window_size = 65535) noexcept;
 
+    /** Handlers for TCP state machine transitions */
+    size_t handle_passive_open_syn_(const IPv4Address& src, const IPv4Address& dst, const TcpPacketView& packet) noexcept;
+    size_t handle_syn_sent_state_(const TcbSharedResource& tcb, const IPv4Address& src, const TcpPacketView& packet) noexcept;
+    size_t handle_syn_received_state_(const TcbSharedResource& tcb, const IPv4Address& src, const TcpPacketView& packet) noexcept;
+    size_t handle_established_state_(const TcbSharedResource& tcb, const TcpPacketView& packet) noexcept;
+
     /** Process a parsed incoming IP+TCP packet against the TCP state machine */
     size_t process_incoming_packet_(std::span<const uint8_t> buffer) noexcept;
 
