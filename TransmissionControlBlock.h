@@ -34,7 +34,7 @@ enum TcpState {
 };
 
 /** Util function for stringifying state */
-constexpr const char *TCP_STATE_TO_STRING(TcpState state) noexcept {
+constexpr const char* TCP_STATE_TO_STRING(TcpState state) noexcept {
     constexpr const char *stateNames[] = {
 #define X(x) #x
         STATES_MACRO
@@ -42,11 +42,15 @@ constexpr const char *TCP_STATE_TO_STRING(TcpState state) noexcept {
     };
 
     assert(state >= TcpState::CLOSED && state <= TcpState::LAST_ACK);
-
     return stateNames[state];
 }
 
 #undef STATES_MACRO
+
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <memory>
 
 /** The control block structure of the socket
 *   Holds the internal state of the socket
@@ -54,6 +58,13 @@ constexpr const char *TCP_STATE_TO_STRING(TcpState state) noexcept {
 struct TransmissionControlBlock {
     /** Current state in the TCP connection */
     TcpState current_state = TcpState::CLOSED;
+
+    /** Synchronization for state transitions and blocking API calls */
+    mutable std::mutex state_mutex;
+    std::condition_variable state_cv;
+
+    /** Queue of completed established connections for listening sockets */
+    std::queue<std::shared_ptr<TransmissionControlBlock>> accept_queue;
 
     /** The source */
     IPv4Address src_address;
@@ -63,31 +74,41 @@ struct TransmissionControlBlock {
 
     /** Send Sequence Variables */
     struct {
-        uint32_t    UNA,    /* Send unacknowleged */
-                    NXT,    /* Send next */
-                    WND,    /* Send window */
-                    UP,     /* Send urgent pointer */
-                    WL1,    /* ss nr for last window update */
-                    WL2,    /* seg. ack nr for last window update */
-                    ISS;    /* Initial send sequence nr */
+        uint32_t    UNA = 0,    /* Send unacknowledged */
+                    NXT = 0,    /* Send next */
+                    WND = 65535,/* Send window */
+                    UP = 0,     /* Send urgent pointer */
+                    WL1 = 0,    /* seg nr for last window update */
+                    WL2 = 0,    /* seg ack nr for last window update */
+                    ISS = 0;    /* Initial send sequence nr */
     } SND;
 
     /** Receive Sequence Variables */
     struct {
-        uint32_t    NXT, /* Receive next */
-                    WND, /* Receive window */
-                    UP, /* Receive urgent pointer */
-                    IRS; /* Initial receive sequence number */
+        uint32_t    NXT = 0, /* Receive next */
+                    WND = 65535, /* Receive window */
+                    UP = 0,  /* Receive urgent pointer */
+                    IRS = 0; /* Initial receive sequence number */
     } RCV;
 
+    /** Current Segment Variables */
+    struct {
+        uint32_t    SEQ = 0, /* Segment Seq nr */
+                    ACK = 0, /* Segment Ack nr */
+                    LEN = 0, /* Segment Len */
+                    WND = 0, /* Segment Window */
+                    UP = 0,  /* Segment urgent pointer */
+                    PRC = 0; /* Segment precedence value */
+    } SEG;
+
     /** Retransmission timeout */
-    uint32_t RTO;
+    uint32_t RTO = 200;
 
     /** Timestamp of the retransmission timer */
-    uint64_t retransmission_timer;
+    uint64_t retransmission_timer = 0;
 
     /** User timeout */
-    uint64_t user_timeout;
+    uint64_t user_timeout = 0;
 
     /** Send buffer */
     BlockingBuffer<uint8_t, MAX_IPV4_PACKET_SIZE> send_buffer;
@@ -95,6 +116,18 @@ struct TransmissionControlBlock {
     /** Receive buffer */
     BlockingBuffer<uint8_t, MAX_IPV4_PACKET_SIZE> recv_buffer;
 
+    TransmissionControlBlock() = default;
+
+    TransmissionControlBlock(TcpState state, IPv4Address src = {}, IPv4Address dst = {})
+        : current_state(state), src_address(src), dst_address(dst) {}
+
+    void set_state(TcpState new_state) noexcept {
+        {
+            std::lock_guard<std::mutex> lock(state_mutex);
+            current_state = new_state;
+        }
+        state_cv.notify_all();
+    }
 };
 
 #endif //TCP_FROM_SCRATCH_TRANSMISSIONCONTROLBLOCK_H

@@ -1,14 +1,14 @@
 #include "TunDevice.h"
 #include <cstring>
+#include <ranges>
 
 TunDevice::TunDevice(const char* dev_name) {
-    char name[256] = {};
     if (dev_name) {
-        std::strncpy(name, dev_name, sizeof(name) - 1);
+        std::strncpy(name_, dev_name, sizeof(name_) - 1);
     } else {
-        std::strcpy(name, "tun0");
+        std::strcpy(name_, "tun0");
     }
-    fd = tun_alloc(name);
+    fd = tun_alloc(name_);
 }
 
 TunDevice::~TunDevice() {
@@ -59,6 +59,34 @@ size_t TunDevice::tun_write(const char* buf, size_t len) const {
     (void)buf; (void)len;
     return 0;
 #endif
+}
+
+#ifndef _WIN32
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#endif
+
+IPv4Address TunDevice::get_usable_ip_address() const noexcept {
+#ifndef _WIN32
+    struct ifaddrs* ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) == 0 && ifaddr != nullptr) {
+        for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+
+            if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_INET) {
+                if (std::strcmp(ifa->ifa_name, name_) == 0) {
+                    auto* sockaddr = reinterpret_cast<struct sockaddr_in*>(ifa->ifa_addr);
+                    uint32_t ip_host_order = ntohl(sockaddr->sin_addr.s_addr);
+                    freeifaddrs(ifaddr);
+                    return { ip_host_order + 1, 0 }; // never return the net address
+                }
+            }
+        }
+        freeifaddrs(ifaddr);
+    }
+#endif
+    // Default fallback IP: 10.0.0.2
+    return { 0x0A000002, 0 };
 }
 
 #ifndef _WIN32

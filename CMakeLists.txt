@@ -25,7 +25,8 @@ add_executable(tcp_from_scratch main.cpp
         TcpStack.h
         TcpStack.cpp
         utils/Checksum.cpp
-        TcpPacket.cpp)
+        TcpPacket.cpp
+        utils/Utils.h)
 
 target_link_libraries(tcp_from_scratch PRIVATE utils)
 
@@ -64,10 +65,10 @@ add_executable(ipv4_header_tests
         TransmissionControlBlock.h
         BlockingBuffer.h
         TcpPacket.cpp
-        TcpStack.h)
+)
 
 target_include_directories(ipv4_header_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(ipv4_header_tests PRIVATE GTest::gtest_main utils)
+target_link_libraries(ipv4_header_tests PRIVATE gtest_main utils)
 
 add_executable(tcp_header_tests
         tests/TcpPacketTest.cpp
@@ -76,7 +77,7 @@ add_executable(tcp_header_tests
         TcpPacket.cpp)
 
 target_include_directories(tcp_header_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(tcp_header_tests PRIVATE GTest::gtest_main utils)
+target_link_libraries(tcp_header_tests PRIVATE gtest_main utils)
 
 add_executable(ipv4_view_tests
         tests/IPv4PacketViewTest.cpp
@@ -86,7 +87,7 @@ add_executable(ipv4_view_tests
         TcpPacket.cpp)
 
 target_include_directories(ipv4_view_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(ipv4_view_tests PRIVATE GTest::gtest_main utils)
+target_link_libraries(ipv4_view_tests PRIVATE gtest_main utils)
 
 add_executable(tcp_view_tests
         tests/TcpPacketViewTest.cpp
@@ -96,7 +97,7 @@ add_executable(tcp_view_tests
         TcpPacket.cpp)
 
 target_include_directories(tcp_view_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(tcp_view_tests PRIVATE GTest::gtest_main utils)
+target_link_libraries(tcp_view_tests PRIVATE gtest_main utils)
 
 add_executable(logger_tests
         tests/LoggerTest.cpp
@@ -104,7 +105,7 @@ add_executable(logger_tests
 )
 
 target_include_directories(logger_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(logger_tests PRIVATE GTest::gtest_main utils)
+target_link_libraries(logger_tests PRIVATE gtest_main utils)
 
 add_executable(tcp_socket_tests
         tests/TcpSocketTest.cpp
@@ -120,10 +121,11 @@ add_executable(tcp_socket_tests
         TcpPacketView.h
         TunDevice.cpp
         TunDevice.h
-        TcpPacket.cpp)
+        TcpPacket.cpp
+        tests/TcpSocketTest.cpp)
 
 target_include_directories(tcp_socket_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(tcp_socket_tests PRIVATE GTest::gtest_main utils)
+target_link_libraries(tcp_socket_tests PRIVATE gtest_main utils)
 
 add_test(NAME ipv4_header_tests COMMAND ipv4_header_tests)
 add_test(NAME tcp_header_tests COMMAND tcp_header_tests)

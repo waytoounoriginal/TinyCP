@@ -43,4 +43,32 @@ TEST(TcpSocketTest, TwoSocketsCommunicatingViaInFlightPackets) {
     EXPECT_STREQ(reinterpret_cast<char*>(read_buf), "Hello from Socket A!");
 }
 
+TEST(TcpSocketTest, ThreeWayHandshakeStateTransitions) {
+    TunDevice tun;
+    TcpStack stack{tun};
+
+    IPv4Address server_addr{ 0x0A000003 /* 10.0.0.3 */, 9090 };
+
+    TcpSocket server_socket{stack};
+    server_socket.bind(server_addr);
+    server_socket.listen();
+
+    EXPECT_EQ(server_socket.state(), TcpState::LISTEN);
+
+    TcpSocket client_socket{stack};
+
+    std::thread server_thread([&]() {
+        TcpSocket accepted_socket = server_socket.accept();
+        EXPECT_EQ(accepted_socket.state(), TcpState::ESTABLISHED);
+    });
+
+    std::thread client_thread([&]() {
+        client_socket.connect(server_addr);
+        EXPECT_EQ(client_socket.state(), TcpState::ESTABLISHED);
+    });
+
+    client_thread.join();
+    server_thread.join();
+}
+
 } // namespace

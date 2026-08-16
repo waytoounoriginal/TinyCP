@@ -20,11 +20,13 @@
 class TcpSocket {
 private:
     TcpStack& stack_;
+
     /** Access to the block owned by the TcpStack */
     TcbSharedResource tcb_;
 
 public:
     explicit TcpSocket(TcpStack& stack) noexcept : stack_(stack) {}
+    explicit TcpSocket(TcpStack& stack, TcbSharedResource tcb) noexcept : stack_(stack), tcb_(tcb) {}
 
     /** Returns the connection state, per RFC 793. */
     TcpState state() const noexcept {
@@ -44,7 +46,8 @@ public:
     /** Initialize the connection */
     void connect(IPv4Address addr) noexcept;
 
-    void accept();
+    /** Passive accept logic, returns a new connected socket */
+    TcpSocket accept();
 
     size_t send(std::span<const uint8_t> data) const noexcept;
 

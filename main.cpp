@@ -26,17 +26,23 @@ int main() {
 
     std::cout << "Socket A (10.0.0.2:8080) <---> Socket B (10.0.0.3:9090) initialized." << std::endl;
 
-    // 3. Socket A sends payload data (pushes to send_buffer and notifies dirty blocks)
+    constexpr size_t kIterations = 100000;
+    std::cout << "\nStarting workload loop (" << kIterations << " iterations)..." << std::endl;
+
     const char message[] = "Hello from Socket A via automatic TcpStack dirty blocks!";
-    std::cout << "\n[Socket A] Sending payload: \"" << message << "\"" << std::endl;
-    socket_a.send({reinterpret_cast<const uint8_t*>(message), sizeof(message)});
-
-    // 4. Socket B reads the payload directly from its receive buffer
     uint8_t recv_buf[128] = {0};
-    size_t bytes_recvd = socket_b.recv({recv_buf, sizeof(recv_buf)});
 
-    std::cout << "[Socket B] Received payload (" << bytes_recvd << " bytes): \""
-              << reinterpret_cast<char*>(recv_buf) << "\"\n" << std::endl;
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    for (size_t i = 0; i < kIterations; ++i) {
+        socket_a.send({reinterpret_cast<const uint8_t*>(message), sizeof(message)});
+        auto size_recved = socket_b.recv({recv_buf, sizeof(recv_buf)});
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+
+    std::cout << "Completed " << kIterations << " iterations in " << elapsed << " ms." << std::endl;
 
     return 0;
 }

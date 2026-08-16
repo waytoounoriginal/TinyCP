@@ -82,7 +82,7 @@ private:
     std::atomic_bool is_running_ {true};
 
     /** Thread-safe, Find the socket in a certain connection */
-    TcbSharedResource find_tcb(IPv4Address src_address, IPv4Address dst_address) noexcept;
+    TcbSharedResource find_connections_tcb_(IPv4Address src_address, IPv4Address dst_address) noexcept;
 
     TcpPacket create_tcp_header_packet_(const TcbSharedResource& tcb, std::span<const uint8_t> data) noexcept;
 
@@ -93,7 +93,11 @@ private:
     /** The daemon thread's lifetime */
     void lifecycle_();
 
-    /** Feeds a raw IPv4+TCP packet directly into the stack (useful for in-memory testing) */
+    /** Sends a TCP control packet (SYN, SYN-ACK, ACK, RST) without payload */
+    size_t send_control_packet_(const TcbSharedResource &tcb, uint8_t syn, uint8_t ack, uint8_t rst, uint32_t seq_num,
+                                uint32_t ack_num, uint16_t window_size = 65535) noexcept;
+
+    /** Process a parsed incoming IP+TCP packet against the TCP state machine */
     size_t process_incoming_packet_(std::span<const uint8_t> buffer) noexcept;
 
     /** Writing to TUN device of a whole IPv4 Packet */
@@ -102,14 +106,12 @@ private:
     /** Read the current TUN Device packet and route to the right socket */
     size_t read_incoming_packets_() noexcept;
 
-    friend class TcpSocketTest;
+    /** Stop the tcp stack */
+    void stop_();
 
 public:
     explicit TcpStack(TunDevice& tun_device);
     ~TcpStack();
-
-    /** Stop the tcp stack */
-    void stop();
 
     /** Callback for adding dirty blocks */
     void add_dirty_tcb(TcbSharedResource tcb);
@@ -118,12 +120,13 @@ public:
     TcbSharedResource bind_socket(IPv4Address addr);
 
     /** Thread-safe, registers an established 4-tuple connection in the connections table */
-    void register_connection(IPv4Address local_addr, IPv4Address remote_addr, TcbSharedResource tcb);
+    TcbSharedResource register_connection(IPv4Address local_addr, IPv4Address remote_addr, TcbSharedResource tcb);
 
-    TcpStack(const TcpStack&) = delete;
-    TcpStack& operator=(const TcpStack&) = delete;
-    TcpStack(TcpStack&&) = delete;
-    TcpStack& operator=(TcpStack&&) = delete;
+    /** Returns local IPv4 address of the stack's network interface */
+    IPv4Address local_address() const noexcept;
+
+    /** Thread-safe allocation of an unused ephemeral port (49152..65535) */
+    uint16_t allocate_ephemeral_port() noexcept;
 };
 
 
