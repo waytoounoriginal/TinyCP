@@ -8,9 +8,9 @@ T(iny)CP is a lightweight, userspace implementation of the Transmission Control 
 
 ## Features
 
-- **Instance-Based Design**: Decoupled, instance-driven architecture (`TunDevice`, `TcpStack`, `TcpSocket`).
+- **Thread-Safe Table Architecture**: Modular table design separating memory ownership (`SocketTable`), port routing (`ListenerTable`), and 4-tuple connection routing (`ConnectionTable`).
+- **RFC 793 Connection Handshakes**: Active (`connect()`), passive (`listen()` / `accept()`), and simultaneous open connection synchronization.
 - **RFC 793 Headers & Views**: Zero-copy packet view abstractions (`IPv4PacketView`, `TcpPacketView`) and header serialization (`IPv4Header`, `TcpHeader`).
-- **3-Way Handshake**: Active (`connect()`) and passive (`listen()` / `accept()`) connection establishment.
 - **RST Handling**: Reset generation and connection abort logic for unsynchronized and closed states.
 - **String IP Parsing**: Address parsing via `IPv4Address::from_string("10.0.0.2:8080")`.
 - **Test Harness**: In-memory packet injection and outbound packet interception (`TCP_STACK_TESTING`).
@@ -35,6 +35,10 @@ ctest --test-dir cmake-build-debug -C Debug --output-on-failure
 
 ## Roadmap
 
-- Advanced RFC 793 connection synchronization (Simultaneous Open & Half-Open recovery)
 - Connection teardown state machine (`FIN_WAIT_1`, `FIN_WAIT_2`, `TIME_WAIT`, `CLOSE_WAIT`, `LAST_ACK`)
 - Sliding window flow control and retransmission timers
+- High-concurrency socket traffic simulation test suite
+
+## License
+
+MIT
