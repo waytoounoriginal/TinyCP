@@ -15,6 +15,7 @@ void TcpSocket::bind(IPv4Address addr) noexcept {
     }
     Logger::instance().info() << "Binding socket to port: " << addr.port;
     tcb_ = stack_.bind_socket(addr);
+    if (!tcb_) return;
 
     tcb_->SND.ISS = generate_random_uint32();
     tcb_->SND.NXT = tcb_->SND.ISS;
@@ -35,6 +36,7 @@ void TcpSocket::listen() noexcept {
 void TcpSocket::connect(IPv4Address addr) noexcept {
     IPv4Address local_addr = tcb_ ? tcb_->src_address : IPv4Address{0, 0};
     tcb_ = stack_.register_connection(local_addr, addr, tcb_);
+    if (!tcb_) return;
 
     Logger::instance().info() << "[TcpSocket] Initiating 3-Way Handshake (SYN) to "
                               << ((addr.address >> 24) & 0xFF) << "."
@@ -43,6 +45,7 @@ void TcpSocket::connect(IPv4Address addr) noexcept {
                               << (addr.address & 0xFF) << ":" << addr.port;
 
     tcb_->SND.ISS = generate_random_uint32();
+    tcb_->SND.UNA = tcb_->SND.ISS;
     tcb_->SND.NXT = tcb_->SND.ISS + 1;
     tcb_->set_state(TcpState::SYN_SENT);
 
@@ -52,10 +55,10 @@ void TcpSocket::connect(IPv4Address addr) noexcept {
     // Wait until 3-way handshake finishes (ESTABLISHED) or fails
     std::unique_lock<std::mutex> lock(tcb_->state_mutex);
     tcb_->state_cv.wait(lock, [this] {
-        return tcb_->current_state == TcpState::ESTABLISHED || tcb_->current_state == TcpState::CLOSED;
+        return tcb_ && (tcb_->current_state == TcpState::ESTABLISHED || tcb_->current_state == TcpState::CLOSED);
     });
 
-    if (tcb_->current_state == TcpState::ESTABLISHED) {
+    if (tcb_ && tcb_->current_state == TcpState::ESTABLISHED) {
         Logger::instance().info() << "[TcpSocket] Connection established successfully with " << addr.port;
     }
 }

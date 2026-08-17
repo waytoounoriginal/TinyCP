@@ -38,6 +38,10 @@ public:
             && header_length() <= bytes_.size();
     }
 
+    [[nodiscard]] size_t size() const noexcept {
+        return bytes_.size();
+    }
+
     /** The raw bytes this view wraps. */
     std::span<const uint8_t> bytes() const noexcept {
         return bytes_;

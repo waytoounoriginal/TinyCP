@@ -10,8 +10,8 @@ int main() {
     TunDevice tun{"tun0"};
     TcpStack stack{tun};
 
-    IPv4Address addr_a{ 0x0A000002 /* 10.0.0.2 */, 8080 };
-    IPv4Address addr_b{ 0x0A000003 /* 10.0.0.3 */, 9090 };
+    IPv4Address addr_a = IPv4Address::from_string("10.0.0.2:8080");
+    IPv4Address addr_b = IPv4Address::from_string("10.0.0.3:9090");
 
     // 1. Create and bind Socket A and Socket B
     TcpSocket socket_a{stack};

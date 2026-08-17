@@ -86,7 +86,7 @@ IPv4Address TunDevice::get_usable_ip_address() const noexcept {
     }
 #endif
     // Default fallback IP: 10.0.0.2
-    return { 0x0A000002, 0 };
+    return IPv4Address::from_string("10.0.0.2");
 }
 
 #ifndef _WIN32

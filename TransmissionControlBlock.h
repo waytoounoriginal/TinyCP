@@ -64,7 +64,7 @@ struct TransmissionControlBlock {
     std::condition_variable state_cv;
 
     /** Queue of completed established connections for listening sockets */
-    std::queue<std::shared_ptr<TransmissionControlBlock>> accept_queue;
+    std::queue<TransmissionControlBlock*> accept_queue;
 
     /** The source */
     IPv4Address src_address;

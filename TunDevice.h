@@ -11,16 +11,12 @@
 using file_descriptor_t = int;
 
 /**
- * The process's single TUN device.
- *
- * A singleton: the device is opened exactly once, on first use of
- * instance(), and shared by every socket in the stack. Creating more
- * than one TUN device (or racing readers over the same one) would
- * split the traffic between readers, so construction is private and
- * non-copyable.
+ * Instance-based Virtual TUN Network Device.
+ * Opens and manages a Linux TUN interface (e.g. /dev/net/tun) for reading/writing raw IP packets.
  */
 class TunDevice {
 public:
+    /** Opens and initializes a TUN device with the specified interface name (default: "tun0") */
     explicit TunDevice(const char* dev_name = "tun0");
     ~TunDevice();
 

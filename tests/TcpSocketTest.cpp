@@ -16,8 +16,8 @@ TEST(TcpSocketTest, TwoSocketsCommunicatingViaInFlightPackets) {
     TunDevice tun;
     TcpStack stack{tun};
 
-    IPv4Address addr_a{ 0x0A000002 /* 10.0.0.2 */, 8080 };
-    IPv4Address addr_b{ 0x0A000003 /* 10.0.0.3 */, 9090 };
+    IPv4Address addr_a = IPv4Address::from_string("10.0.0.2:8080");
+    IPv4Address addr_b = IPv4Address::from_string("10.0.0.3:9090");
 
     // 1. Create and bind Socket A and Socket B
     TcpSocket socket_a{stack};
@@ -28,6 +28,9 @@ TEST(TcpSocketTest, TwoSocketsCommunicatingViaInFlightPackets) {
 
     stack.register_connection(addr_a, addr_b, socket_a.tcb());
     stack.register_connection(addr_b, addr_a, socket_b.tcb());
+
+    socket_a.tcb()->set_state(ESTABLISHED);
+    socket_b.tcb()->set_state(ESTABLISHED);
 
     // 3. Prepare test payload and write to Socket A's send buffer
     const uint8_t message[] = "Hello from Socket A!";
@@ -47,7 +50,7 @@ TEST(TcpSocketTest, ThreeWayHandshakeStateTransitions) {
     TunDevice tun;
     TcpStack stack{tun};
 
-    IPv4Address server_addr{ 0x0A000003 /* 10.0.0.3 */, 9090 };
+    IPv4Address server_addr = IPv4Address::from_string("10.0.0.3:9090");
 
     TcpSocket server_socket{stack};
     server_socket.bind(server_addr);

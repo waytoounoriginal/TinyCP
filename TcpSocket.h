@@ -17,40 +17,47 @@
 #include "TransmissionControlBlock.h"
 
 
+/** Primary userspace TCP socket interface */
 class TcpSocket {
 private:
     TcpStack& stack_;
 
-    /** Access to the block owned by the TcpStack */
-    TcbSharedResource tcb_;
+    /** Non-owning reference to the Transmission Control Block owned by the TcpStack */
+    TcbNonOwningPtr tcb_{nullptr};
 
 public:
+    /** Constructs an unbound TCP socket */
     explicit TcpSocket(TcpStack& stack) noexcept : stack_(stack) {}
-    explicit TcpSocket(TcpStack& stack, TcbSharedResource tcb) noexcept : stack_(stack), tcb_(tcb) {}
 
-    /** Returns the connection state, per RFC 793. */
+    /** Constructs a TCP socket wrapping an existing TCB (used by accept()) */
+    explicit TcpSocket(TcpStack& stack, TcbNonOwningPtr tcb) noexcept : stack_(stack), tcb_(tcb) {}
+
+    /** Returns current TCP state (per RFC 793) */
     TcpState state() const noexcept {
         return tcb_ ? tcb_->current_state : TcpState::CLOSED;
     }
 
-    TcbSharedResource tcb() const noexcept {
+    /** Returns non-owning underlying TCB pointer */
+    TcbNonOwningPtr tcb() const noexcept {
         return tcb_;
     }
 
-    /** Registers an entry in the demultiplexer */
+    /** Binds socket to a local address/port (auto-allocates if 0) */
     void bind(IPv4Address addr) noexcept;
 
-    /** Puts the socket in listening mode */
+    /** Transitions socket to LISTEN state for passive open */
     void listen() noexcept;
 
-    /** Initialize the connection */
+    /** Initiates active 3-way handshake to remote address */
     void connect(IPv4Address addr) noexcept;
 
-    /** Passive accept logic, returns a new connected socket */
+    /** Blocks until an incoming connection is established and returns a connected TcpSocket */
     TcpSocket accept();
 
+    /** Writes payload data to send buffer and notifies stack */
     size_t send(std::span<const uint8_t> data) const noexcept;
 
+    /** Reads payload data from receive buffer */
     size_t recv(std::span<uint8_t> data) const noexcept;
 };
 

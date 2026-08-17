@@ -24,6 +24,12 @@ add_executable(tcp_from_scratch main.cpp
         TcpSocket.cpp
         TcpStack.h
         TcpStack.cpp
+        SocketTable.h
+        SocketTable.cpp
+        ListenerTable.h
+        ListenerTable.cpp
+        ConnectionTable.h
+        ConnectionTable.cpp
         utils/Checksum.cpp
         TcpPacket.cpp
         utils/Utils.h)
@@ -44,6 +50,12 @@ add_executable(packet_dump
         TcpSocket.cpp
         TcpStack.h
         TcpStack.cpp
+        SocketTable.h
+        SocketTable.cpp
+        ListenerTable.h
+        ListenerTable.cpp
+        ConnectionTable.h
+        ConnectionTable.cpp
         TcpPacket.cpp)
 
 target_link_libraries(packet_dump PRIVATE utils)
@@ -113,6 +125,12 @@ add_executable(tcp_socket_tests
         TcpSocket.cpp
         TcpStack.h
         TcpStack.cpp
+        SocketTable.h
+        SocketTable.cpp
+        ListenerTable.h
+        ListenerTable.cpp
+        ConnectionTable.h
+        ConnectionTable.cpp
         IPv4Packet.h
         IPv4Packet.cpp
         IPv4PacketView.h
@@ -120,16 +138,49 @@ add_executable(tcp_socket_tests
         TcpPacket.cpp
         TcpPacketView.h
         TunDevice.cpp
-        TunDevice.h
-        TcpPacket.cpp
-        tests/TcpSocketTest.cpp)
+        TunDevice.h)
 
 target_include_directories(tcp_socket_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(tcp_socket_tests PRIVATE TCP_STACK_TESTING=1)
 target_link_libraries(tcp_socket_tests PRIVATE gtest_main utils)
 
+add_executable(rfc793_scenarios_tests
+        tests/Rfc793ScenariosTest.cpp
+        TcpSocket.h
+        TcpSocket.cpp
+        TcpStack.h
+        TcpStack.cpp
+        SocketTable.h
+        SocketTable.cpp
+        ListenerTable.h
+        ListenerTable.cpp
+        ConnectionTable.h
+        ConnectionTable.cpp
+        IPv4Packet.h
+        IPv4Packet.cpp
+        IPv4PacketView.h
+        TcpPacket.h
+        TcpPacket.cpp
+        TcpPacketView.h
+        TunDevice.cpp
+        TunDevice.h)
+
+target_include_directories(rfc793_scenarios_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(rfc793_scenarios_tests PRIVATE TCP_STACK_TESTING=1)
+target_link_libraries(rfc793_scenarios_tests PRIVATE gtest_main utils)
+
+add_executable(ipv4_address_tests
+        tests/IPv4AddressTest.cpp
+        IPv4.h)
+
+target_include_directories(ipv4_address_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(ipv4_address_tests PRIVATE gtest_main utils)
+
 add_test(NAME ipv4_header_tests COMMAND ipv4_header_tests)
+add_test(NAME ipv4_address_tests COMMAND ipv4_address_tests)
 add_test(NAME tcp_header_tests COMMAND tcp_header_tests)
 add_test(NAME ipv4_view_tests COMMAND ipv4_view_tests)
 add_test(NAME tcp_view_tests COMMAND tcp_view_tests)
 add_test(NAME logger_tests COMMAND logger_tests)
 add_test(NAME tcp_socket_tests COMMAND tcp_socket_tests)
+add_test(NAME rfc793_scenarios_tests COMMAND rfc793_scenarios_tests)
