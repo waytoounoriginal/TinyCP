@@ -17,7 +17,7 @@ class ListenerTable {
 private:
     SocketTable& socket_table_;
     mutable std::mutex mutex_;
-    std::unordered_map<uint16_t, TransmissionControlBlock*> listeners_;
+    std::unordered_map<uint16_t, uint64_t> listeners_;
 
 public:
     explicit ListenerTable(SocketTable& socket_table) : socket_table_(socket_table) {}
@@ -26,19 +26,19 @@ public:
     ListenerTable(const ListenerTable&) = delete;
     ListenerTable& operator=(const ListenerTable&) = delete;
 
-    /** Binds a listening port to an existing TCB reference */
-    void bind(uint16_t port, TransmissionControlBlock* tcb);
+    /** Binds a listening port to a socket ID */
+    void bind(uint16_t port, uint64_t socket_id);
 
-    /** Creates a new CLOSED socket via SocketTable and binds it to the given port */
-    TransmissionControlBlock* bind_new(IPv4Address addr);
+    /** Creates a new CLOSED socket via SocketTable, binds it to the given port, and returns its socket ID */
+    uint64_t bind_new(IPv4Address addr);
 
-    /** Looks up a listening TransmissionControlBlock by port */
-    TransmissionControlBlock* find(uint16_t port) const;
+    /** Looks up a listening socket ID by port, checking existence in SocketTable */
+    uint64_t find(uint16_t port) const;
 
-    /** Removes a listening port mapping */
+    /** Removes a listening port mapping and destroys its socket in SocketTable */
     bool unbind(uint16_t port);
 
-    /** Returns true if a listening port is bound */
+    /** Returns true if a listening port is bound and valid in SocketTable */
     bool contains(uint16_t port) const;
 };
 

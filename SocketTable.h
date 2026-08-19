@@ -24,17 +24,20 @@ public:
     SocketTable(const SocketTable&) = delete;
     SocketTable& operator=(const SocketTable&) = delete;
 
-    /** Allocates a new TransmissionControlBlock and returns a non-owning raw pointer to it */
-    TransmissionControlBlock* create_socket(TcpState state = TcpState::CLOSED, IPv4Address src = {}, IPv4Address dst = {});
+    /** Allocates a new TransmissionControlBlock and returns its assigned unique socket ID */
+    uint64_t create_socket(TcpState state = TcpState::CLOSED, IPv4Address src = {}, IPv4Address dst = {});
 
-    /** Destroys and frees a TransmissionControlBlock owned by this table */
-    bool destroy_socket(TransmissionControlBlock* tcb);
+    /** Destroys and frees a TransmissionControlBlock owned by this table by its socket ID */
+    bool destroy_socket(uint64_t id);
 
     /** Looks up a TransmissionControlBlock by its unique socket ID */
     TransmissionControlBlock* find_socket(uint64_t id) const;
 
+    /** Checks if a socket ID exists in the table */
+    bool contains(uint64_t id) const;
+
     /** Returns current number of active sockets */
-    size_t size() const noexcept;
+    size_t size() const;
 };
 
 #endif // TCP_FROM_SCRATCH_SOCKETTABLE_H

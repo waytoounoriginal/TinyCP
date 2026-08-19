@@ -22,43 +22,44 @@ class TcpSocket {
 private:
     TcpStack& stack_;
 
-    /** Non-owning reference to the Transmission Control Block owned by the TcpStack */
-    TcbNonOwningPtr tcb_{nullptr};
+    /** Unique identifier of the underlying TCB owned by SocketTable */
+    uint64_t socket_id_{0};
 
 public:
     /** Constructs an unbound TCP socket */
-    explicit TcpSocket(TcpStack& stack) noexcept : stack_(stack) {}
+    explicit TcpSocket(TcpStack& stack) : stack_(stack) {}
 
-    /** Constructs a TCP socket wrapping an existing TCB (used by accept()) */
-    explicit TcpSocket(TcpStack& stack, TcbNonOwningPtr tcb) noexcept : stack_(stack), tcb_(tcb) {}
+    /** Constructs a TCP socket wrapping an existing socket ID (used by accept()) */
+    explicit TcpSocket(TcpStack& stack, uint64_t socket_id) : stack_(stack), socket_id_(socket_id) {}
 
     /** Returns current TCP state (per RFC 793) */
-    TcpState state() const noexcept {
-        return tcb_ ? tcb_->current_state : TcpState::CLOSED;
-    }
+    TcpState state() const;
 
-    /** Returns non-owning underlying TCB pointer */
-    TcbNonOwningPtr tcb() const noexcept {
-        return tcb_;
+    /** Returns unique socket ID */
+    uint64_t socket_id() const {
+        return socket_id_;
     }
 
     /** Binds socket to a local address/port (auto-allocates if 0) */
-    void bind(IPv4Address addr) noexcept;
+    void bind(IPv4Address addr);
 
     /** Transitions socket to LISTEN state for passive open */
-    void listen() noexcept;
+    void listen();
 
     /** Initiates active 3-way handshake to remote address */
-    void connect(IPv4Address addr) noexcept;
+    void connect(IPv4Address addr);
 
     /** Blocks until an incoming connection is established and returns a connected TcpSocket */
     TcpSocket accept();
 
     /** Writes payload data to send buffer and notifies stack */
-    size_t send(std::span<const uint8_t> data) const noexcept;
+    size_t send(std::span<const uint8_t> data) const;
 
     /** Reads payload data from receive buffer */
-    size_t recv(std::span<uint8_t> data) const noexcept;
+    size_t recv(std::span<uint8_t> data) const;
+
+    /** Closes connection and initiates active FIN teardown */
+    void close();
 };
 
 

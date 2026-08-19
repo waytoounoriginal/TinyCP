@@ -176,6 +176,31 @@ add_executable(ipv4_address_tests
 target_include_directories(ipv4_address_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ipv4_address_tests PRIVATE gtest_main utils)
 
+add_executable(tcp_teardown_tests
+        tests/TcpTeardownTest.cpp
+        TcpSocket.h
+        TcpSocket.cpp
+        TcpStack.h
+        TcpStack.cpp
+        SocketTable.h
+        SocketTable.cpp
+        ListenerTable.h
+        ListenerTable.cpp
+        ConnectionTable.h
+        ConnectionTable.cpp
+        IPv4Packet.h
+        IPv4Packet.cpp
+        IPv4PacketView.h
+        TcpPacket.h
+        TcpPacket.cpp
+        TcpPacketView.h
+        TunDevice.cpp
+        TunDevice.h)
+
+target_include_directories(tcp_teardown_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(tcp_teardown_tests PRIVATE TCP_STACK_TESTING=1)
+target_link_libraries(tcp_teardown_tests PRIVATE gtest_main utils)
+
 add_test(NAME ipv4_header_tests COMMAND ipv4_header_tests)
 add_test(NAME ipv4_address_tests COMMAND ipv4_address_tests)
 add_test(NAME tcp_header_tests COMMAND tcp_header_tests)
@@ -184,3 +209,4 @@ add_test(NAME tcp_view_tests COMMAND tcp_view_tests)
 add_test(NAME logger_tests COMMAND logger_tests)
 add_test(NAME tcp_socket_tests COMMAND tcp_socket_tests)
 add_test(NAME rfc793_scenarios_tests COMMAND rfc793_scenarios_tests)
+add_test(NAME tcp_teardown_tests COMMAND tcp_teardown_tests)

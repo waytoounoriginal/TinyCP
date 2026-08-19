@@ -6,7 +6,12 @@
 #include "utils/Logger.h"
 #include "utils/Utils.h"
 
-void TcpSocket::bind(IPv4Address addr) noexcept {
+TcpState TcpSocket::state() const {
+    auto* tcb = stack_.get_tcb(socket_id_);
+    return tcb ? tcb->current_state : TcpState::CLOSED;
+}
+
+void TcpSocket::bind(IPv4Address addr) {
     if (addr.address == 0) {
         addr.address = stack_.local_address().address;
     }
@@ -14,28 +19,32 @@ void TcpSocket::bind(IPv4Address addr) noexcept {
         addr.port = stack_.allocate_ephemeral_port();
     }
     INFO << "Binding socket to port: " << addr.port;
-    tcb_ = stack_.bind_socket(addr);
-    if (!tcb_) return;
+    socket_id_ = stack_.bind_socket(addr);
+    auto* tcb = stack_.get_tcb(socket_id_);
+    if (!tcb) return;
 
-    tcb_->SND.ISS = generate_random_uint32();
-    tcb_->SND.NXT = tcb_->SND.ISS;
+    tcb->SND.ISS = generate_random_uint32();
+    tcb->SND.NXT = tcb->SND.ISS;
 }
 
-void TcpSocket::listen() noexcept {
-    if (!tcb_ || tcb_->current_state != TcpState::CLOSED) {
+void TcpSocket::listen() {
+    auto* tcb = stack_.get_tcb(socket_id_);
+    if (!tcb || tcb->current_state != TcpState::CLOSED) {
         WARN << "Trying to LISTEN, but socket state is invalid";
         return;
     }
 
     INFO << "Moving state to LISTEN";
-    tcb_->current_state = TcpState::LISTEN;
+    tcb->current_state = TcpState::LISTEN;
 }
 
 
-void TcpSocket::connect(IPv4Address addr) noexcept {
-    IPv4Address local_addr = tcb_ ? tcb_->src_address : IPv4Address{0, 0};
-    tcb_ = stack_.register_connection(local_addr, addr, tcb_);
-    if (!tcb_) return;
+void TcpSocket::connect(IPv4Address addr) {
+    auto* tcb = stack_.get_tcb(socket_id_);
+    IPv4Address local_addr = tcb ? tcb->src_address : IPv4Address{0, 0};
+    socket_id_ = stack_.register_connection(local_addr, addr, socket_id_);
+    tcb = stack_.get_tcb(socket_id_);
+    if (!tcb) return;
 
     INFO << "[TcpSocket] Initiating 3-Way Handshake (SYN) to "
          << ((addr.address >> 24) & 0xFF) << "."
@@ -43,58 +52,82 @@ void TcpSocket::connect(IPv4Address addr) noexcept {
          << ((addr.address >> 8) & 0xFF) << "."
          << (addr.address & 0xFF) << ":" << addr.port;
 
-    tcb_->SND.ISS = generate_random_uint32();
-    tcb_->SND.UNA = tcb_->SND.ISS;
-    tcb_->SND.NXT = tcb_->SND.ISS + 1;
-    tcb_->set_state(TcpState::SYN_SENT);
+    tcb->SND.ISS = generate_random_uint32();
+    tcb->SND.UNA = tcb->SND.ISS;
+    tcb->SND.NXT = tcb->SND.ISS + 1;
+    tcb->set_state(TcpState::SYN_SENT);
 
     // Queue SYN transmission
-    stack_.add_dirty_tcb(tcb_);
+    stack_.add_dirty_tcb(socket_id_);
 
     // Wait until 3-way handshake finishes (ESTABLISHED) or fails
-    std::unique_lock<std::mutex> lock(tcb_->state_mutex);
-    tcb_->state_cv.wait(lock, [this] {
-        return tcb_ && (tcb_->current_state == TcpState::ESTABLISHED || tcb_->current_state == TcpState::CLOSED);
+    std::unique_lock<std::mutex> lock(tcb->state_mutex);
+    tcb->state_cv.wait(lock, [this] {
+        auto* t = stack_.get_tcb(socket_id_);
+        return t && (t->current_state == TcpState::ESTABLISHED || t->current_state == TcpState::CLOSED);
     });
 
-    if (tcb_ && tcb_->current_state == TcpState::ESTABLISHED) {
+    tcb = stack_.get_tcb(socket_id_);
+    if (tcb && tcb->current_state == TcpState::ESTABLISHED) {
         INFO << "[TcpSocket] Connection established successfully with " << addr.port;
     }
 }
 
 TcpSocket TcpSocket::accept() {
-    if (!tcb_ || tcb_->current_state != TcpState::LISTEN) {
+    auto* tcb = stack_.get_tcb(socket_id_);
+    if (!tcb || tcb->current_state != TcpState::LISTEN) {
         WARN << "Calling accept() on socket that is not in LISTEN state";
         return TcpSocket{stack_};
     }
 
-    INFO << "[TcpSocket] Waiting in accept() for incoming connection on port " << tcb_->src_address.port << "...";
+    INFO << "[TcpSocket] Waiting in accept() for incoming connection on port " << tcb->src_address.port << "...";
 
-    std::unique_lock<std::mutex> lock(tcb_->state_mutex);
-    tcb_->state_cv.wait(lock, [this] {
-        return !tcb_->accept_queue.empty();
+    std::unique_lock<std::mutex> lock(tcb->state_mutex);
+    tcb->state_cv.wait(lock, [this] {
+        auto* t = stack_.get_tcb(socket_id_);
+        return t && !t->accept_queue.empty();
     });
 
-    auto child_tcb = tcb_->accept_queue.front();
-    tcb_->accept_queue.pop();
+    tcb = stack_.get_tcb(socket_id_);
+    if (!tcb || tcb->accept_queue.empty()) {
+        ERROR << "[TcpStack] Accept queue was empty.";
+        return TcpSocket{stack_};
+    }
 
-    INFO << "[TcpSocket] Accepted connection from " << child_tcb->dst_address.port;
+    uint64_t child_id = tcb->accept_queue.front();
+    tcb->accept_queue.pop();
 
-    return TcpSocket{stack_, child_tcb};
+    auto* child_tcb = stack_.get_tcb(child_id);
+    if (child_tcb) {
+        INFO << "[TcpSocket] Accepted connection from " << child_tcb->dst_address.port;
+    }
+
+    return TcpSocket{stack_, child_id};
 }
 
-size_t TcpSocket::send(std::span<const uint8_t> data) const noexcept {
-    if (!tcb_) return 0;
+size_t TcpSocket::send(std::span<const uint8_t> data) const {
+    auto* tcb = stack_.get_tcb(socket_id_);
+    if (!tcb) return 0;
 
-    auto sent_data = tcb_->send_buffer.write(data);
-    stack_.add_dirty_tcb(tcb_);
+    auto sent_data = tcb->send_buffer.write(data);
+    stack_.add_dirty_tcb(socket_id_);
     return sent_data;
 }
 
-size_t TcpSocket::recv(std::span<uint8_t> data) const noexcept {
-    if (!tcb_) return 0;
+size_t TcpSocket::recv(std::span<uint8_t> data) const {
+    auto* tcb = stack_.get_tcb(socket_id_);
+    if (!tcb) return 0;
 
-    // Aslo check that the connection was established
+    auto bytes_read = tcb->recv_buffer.read(data);
+    if (bytes_read == 0 && (tcb->current_state == TcpState::CLOSE_WAIT ||
+                            tcb->current_state == TcpState::LAST_ACK ||
+                            tcb->current_state == TcpState::CLOSED)) {
+        return 0; // EOF
+    }
+    return bytes_read;
+}
 
-    return tcb_->recv_buffer.read(data);
+void TcpSocket::close() {
+    if (socket_id_ == 0) return;
+    stack_.close_connection(socket_id_);
 }

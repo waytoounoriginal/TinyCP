@@ -50,82 +50,73 @@ private:
     /** 4-tuple routing table for active connections */
     ConnectionTable connection_table_;
 
-    /** Queue for processing resources */
-    std::queue<TcbNonOwningPtr> dirty_blocks_ {};
+    /** Queue for processing socket IDs with pending outbound data */
+    std::queue<uint64_t> dirty_socket_ids_ {};
 
     TunDevice& tun_device_;
     std::thread daemon_thread_;
     std::atomic_bool is_running_ {true};
 
-    /** Thread-safe, Find the socket in a certain connection */
-    TcbNonOwningPtr find_connections_tcb_(IPv4Address src_address, IPv4Address dst_address) noexcept;
+    /** Lookup socket in active connections table */
+    uint64_t find_connections_tcb_(IPv4Address src_address, IPv4Address dst_address);
 
-    TcpPacket create_tcp_header_packet_(const TcbNonOwningPtr& tcb, std::span<const uint8_t> data) noexcept;
+    TcpPacket create_tcp_header_packet_(const TransmissionControlBlock* tcb, std::span<const uint8_t> data) noexcept;
 
-    void process_block_(const TcbNonOwningPtr& tcb) noexcept;
+    void process_block_(uint64_t socket_id);
 
     void process_dirty_blocks_();
 
     /** The daemon thread's lifetime */
     void lifecycle_();
 
-    /** Sends a TCP control packet (SYN, SYN-ACK, ACK, RST) using an existing TCB */
-    size_t send_control_packet_(const TcbNonOwningPtr &tcb, uint8_t syn, uint8_t ack, uint8_t rst, uint32_t seq_num,
+    /** Sends a TCP control packet (SYN, SYN-ACK, ACK, RST, FIN) using an existing TCB */
+    size_t send_control_packet_(TransmissionControlBlock* tcb, uint8_t syn, uint8_t ack, uint8_t rst, uint8_t fin, uint32_t seq_num,
                                 uint32_t ack_num, uint16_t window_size = 65535) noexcept;
 
     /** 
      * Transmits a raw RST segment when no valid TCB exists (e.g. for CLOSED sockets or unknown 4-tuples).
-     * @param src Source IPv4 address + port (local end transmitting the RST)
-     * @param dst Destination IPv4 address + port (remote end receiving the RST)
-     * @param seq_num Sequence number for the RST segment
-     * @param ack_num Acknowledgment number for the RST segment (if ACK flag is set)
-     * @param ack_flag 1 if ACK flag is set, 0 otherwise
      */
     size_t send_raw_rst_(const IPv4Address& src, const IPv4Address& dst, uint32_t seq_num, uint32_t ack_num, uint8_t ack_flag) noexcept;
 
     /** 
-     * RFC 793 Reset Generation Rule (CLOSED / Non-Existent Connection):
-     * If an incoming segment arrives for a non-existent connection, a RST is sent in response:
-     * - If incoming has ACK: RST SEQ = incoming ACK, ACK flag = 0.
-     * - If incoming has no ACK: RST SEQ = 0, RST ACK = incoming SEQ + SEG.LEN, ACK flag = 1.
+     * RFC 793 Reset Generation Rule (CLOSED / Non-Existent Connection).
      */
     size_t handle_closed_reset_response_(const IPv4Address& src, const IPv4Address& dst, const TcpPacketView& packet) noexcept;
 
     /** 
      * Handles passive open SYN arrival on a listening socket (LISTEN state).
-     * Allocates a child TCB in SYN_RECEIVED state, registers connection 4-tuple, and transmits SYN-ACK.
      */
-    size_t handle_passive_open_syn_(const IPv4Address& src, const IPv4Address& dst, const TcpPacketView& packet) noexcept;
+    size_t handle_passive_open_syn_(const IPv4Address& src, const IPv4Address& dst, const TcpPacketView& packet);
 
-    /** 
-     * Handles state transitions and reset processing in SYN_SENT state (Active Open).
-     * - Processes incoming RST (resets connection to CLOSED).
-     * - Validates ACK field against SND.NXT (transmits RST if ACK is unacceptable).
-     * - Transitions to ESTABLISHED upon receiving valid SYN-ACK and transmits final ACK.
-     */
-    size_t handle_syn_sent_state_(const TcbNonOwningPtr& tcb, const IPv4Address& src, const TcpPacketView& packet) noexcept;
+    /** Handles SYN_SENT state */
+    size_t handle_syn_sent_state_(uint64_t socket_id, const IPv4Address& src, const TcpPacketView& packet);
 
-    /** 
-     * Handles state transitions and reset processing in SYN_RECEIVED state (Passive Open).
-     * - Processes incoming RST (aborts connection and removes child TCB from active table).
-     * - Validates final ACK from client and transitions connection state to ESTABLISHED.
-     * - Pushes established child TCB onto parent listener's accept_queue.
-     */
-    size_t handle_syn_received_state_(const TcbNonOwningPtr& tcb, const IPv4Address& src, const TcpPacketView& packet) noexcept;
+    /** Handles SYN_RECEIVED state */
+    size_t handle_syn_received_state_(uint64_t socket_id, const IPv4Address& src, const TcpPacketView& packet);
 
-    /** 
-     * Handles payload data delivery for ESTABLISHED connections.
-     */
-    size_t handle_established_state_(const TcbNonOwningPtr& tcb, const TcpPacketView& packet) noexcept;
+    /** Handles ESTABLISHED state */
+    size_t handle_established_state_(uint64_t socket_id, const TcpPacketView& packet);
+
+    /** Handles FIN_WAIT_1 state */
+    size_t handle_fin_wait_1_state_(uint64_t socket_id, const TcpPacketView& packet);
+
+    /** Handles FIN_WAIT_2 state */
+    size_t handle_fin_wait_2_state_(uint64_t socket_id, const TcpPacketView& packet);
+
+    /** Handles CLOSING state */
+    size_t handle_closing_state_(uint64_t socket_id, const TcpPacketView& packet);
+
+    /** Handles LAST_ACK state */
+    size_t handle_last_ack_state_(uint64_t socket_id, const TcpPacketView& packet);
 
     /** Process a parsed incoming IP+TCP packet against the TCP state machine */
-    size_t process_incoming_packet_(std::span<const uint8_t> buffer) noexcept;
+    size_t process_incoming_packet_(std::span<const uint8_t> buffer);
 
     /** Writing to TUN device of a whole IPv4 Packet */
     size_t write_packet_(IPv4Address src_address, IPv4Address dst_address, const TcpPacket& packet) noexcept;
 
     /** Read the current TUN Device packet and route to the right socket */
-    size_t read_incoming_packets_() noexcept;
+    size_t read_incoming_packets_();
 
     /** Stop the tcp stack */
     void stop_();
@@ -134,27 +125,38 @@ public:
     explicit TcpStack(TunDevice& tun_device);
     ~TcpStack();
 
-    /** Callback for adding dirty blocks */
-    void add_dirty_tcb(TcbNonOwningPtr tcb);
+    /** Looks up a TransmissionControlBlock by its unique socket ID, validating existence */
+    TransmissionControlBlock* get_tcb(uint64_t socket_id) const {
+        return socket_table_.find_socket(socket_id);
+    }
 
-    /** Thread-safe logging into the sockets table */
-    TcbNonOwningPtr bind_socket(IPv4Address addr);
+    /** Callback for adding dirty socket IDs */
+    void add_dirty_tcb(uint64_t socket_id);
 
-    /** Thread-safe, registers an established 4-tuple connection in the connections table */
-    TcbNonOwningPtr register_connection(IPv4Address local_addr, IPv4Address remote_addr, TcbNonOwningPtr tcb);
+    /** Thread-safe logging into the sockets table, returning allocated socket ID */
+    uint64_t bind_socket(IPv4Address addr);
+
+    /** Thread-safe, registers an established 4-tuple connection in the connections table, returning socket ID */
+    uint64_t register_connection(IPv4Address local_addr, IPv4Address remote_addr, uint64_t socket_id);
+
+    /** Closes a connection between 2 sockets */
+    size_t close_connection(uint64_t socket_id);
+
+    /** Destroys a connection by 4-tuple key (remote_addr, local_addr) and frees TCB resource */
+    bool destroy_connection(IPv4Address remote_addr, IPv4Address local_addr);
 
     /** Returns local IPv4 address of the stack's network interface */
     IPv4Address local_address() const noexcept;
 
     /** Thread-safe allocation of an unused ephemeral port (49152..65535) */
-    uint16_t allocate_ephemeral_port() noexcept;
+    uint16_t allocate_ephemeral_port();
 
 #ifdef TCP_STACK_TESTING
 public:
     using OutboundPacketCallback = std::function<void(IPv4Address src, IPv4Address dst, const TcpPacket& packet)>;
 
     /** In-memory packet injection helper for testing without TUN device */
-    size_t inject_packet(std::span<const uint8_t> raw_bytes) noexcept {
+    size_t inject_packet(std::span<const uint8_t> raw_bytes) {
         return process_incoming_packet_(raw_bytes);
     }
 
@@ -164,7 +166,7 @@ public:
     }
 
     /** Simulates sudden node crash by wiping connection TCB without FIN/RST */
-    void simulate_node_crash(IPv4Address remote_addr, IPv4Address local_addr) noexcept {
+    void simulate_node_crash(IPv4Address remote_addr, IPv4Address local_addr) {
         connection_table_.erase(remote_addr, local_addr);
     }
 

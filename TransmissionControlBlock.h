@@ -56,6 +56,9 @@ constexpr const char* TCP_STATE_TO_STRING(TcpState state) noexcept {
 *   Holds the internal state of the socket
 */
 struct TransmissionControlBlock {
+    /** Unique socket identifier */
+    uint64_t id = 0;
+
     /** Current state in the TCP connection */
     TcpState current_state = TcpState::CLOSED;
 
@@ -63,8 +66,8 @@ struct TransmissionControlBlock {
     mutable std::mutex state_mutex;
     std::condition_variable state_cv;
 
-    /** Queue of completed established connections for listening sockets */
-    std::queue<TransmissionControlBlock*> accept_queue;
+    /** Queue of completed established socket IDs for listening sockets */
+    std::queue<uint64_t> accept_queue;
 
     /** The source */
     IPv4Address src_address;
@@ -121,12 +124,24 @@ struct TransmissionControlBlock {
     TransmissionControlBlock(TcpState state, IPv4Address src = {}, IPv4Address dst = {})
         : current_state(state), src_address(src), dst_address(dst) {}
 
-    void set_state(TcpState new_state) noexcept {
+    inline void set_state(TcpState new_state) noexcept {
         {
             std::lock_guard<std::mutex> lock(state_mutex);
             current_state = new_state;
         }
         state_cv.notify_all();
+    }
+
+    /** Socket is closing -- wake the buffers */
+    inline void close() {
+        // Finish reading
+        recv_buffer.force_wake_up_();
+
+        // finish writing
+        send_buffer.force_wake_up_();
+
+        // Set the status to -- depends on the current state
+        set_state(current_state == TcpState::ESTABLISHED ?  FIN_WAIT_1 : LAST_ACK );
     }
 };
 

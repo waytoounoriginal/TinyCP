@@ -21,8 +21,8 @@ int main() {
     socket_b.bind(addr_b);
 
     // 2. Register connection 4-tuples in TcpStack
-    stack.register_connection(addr_a, addr_b, socket_a.tcb());
-    stack.register_connection(addr_b, addr_a, socket_b.tcb());
+    stack.register_connection(addr_a, addr_b, socket_a.socket_id());
+    stack.register_connection(addr_b, addr_a, socket_b.socket_id());
 
     std::cout << "Socket A (10.0.0.2:8080) <---> Socket B (10.0.0.3:9090) initialized." << std::endl;
 

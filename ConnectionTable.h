@@ -38,7 +38,7 @@ public:
 private:
     SocketTable& socket_table_;
     mutable std::mutex mutex_;
-    std::unordered_map<ConnectionKey, TransmissionControlBlock*, ConnectionKeyHash> connections_;
+    std::unordered_map<ConnectionKey, uint64_t, ConnectionKeyHash> connections_;
 
 public:
     explicit ConnectionTable(SocketTable& socket_table) : socket_table_(socket_table) {}
@@ -47,17 +47,20 @@ public:
     ConnectionTable(const ConnectionTable&) = delete;
     ConnectionTable& operator=(const ConnectionTable&) = delete;
 
-    /** Inserts an existing TCB into the 4-tuple connection routing table */
-    void insert(IPv4Address remote_addr, IPv4Address local_addr, TransmissionControlBlock* tcb);
+    /** Inserts a socket ID into the 4-tuple connection routing table */
+    void insert(IPv4Address remote_addr, IPv4Address local_addr, uint64_t socket_id);
 
-    /** Registers a connection: uses existing TCB if non-null, or allocates a new TCB via SocketTable */
-    TransmissionControlBlock* register_connection(IPv4Address local_addr, IPv4Address remote_addr, TransmissionControlBlock* tcb);
+    /** Registers a connection: uses existing socket_id if non-zero, or allocates a new socket via SocketTable */
+    uint64_t register_connection(IPv4Address local_addr, IPv4Address remote_addr, uint64_t socket_id);
 
-    /** Looks up an active connection TransmissionControlBlock by 4-tuple */
-    TransmissionControlBlock* find(IPv4Address remote_addr, IPv4Address local_addr) const;
+    /** Looks up an active connection socket ID by 4-tuple, validating existence in SocketTable */
+    uint64_t find(IPv4Address remote_addr, IPv4Address local_addr) const;
 
     /** Removes a 4-tuple connection mapping */
     bool erase(IPv4Address remote_addr, IPv4Address local_addr);
+
+    /** Destroys a 4-tuple connection mapping AND frees the underlying TCB in SocketTable */
+    bool destroy_connection(IPv4Address remote_addr, IPv4Address local_addr);
 };
 
 #endif // TCP_FROM_SCRATCH_CONNECTIONTABLE_H

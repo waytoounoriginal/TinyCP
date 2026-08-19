@@ -26,17 +26,21 @@ TEST(TcpSocketTest, TwoSocketsCommunicatingViaInFlightPackets) {
     TcpSocket socket_b{stack};
     socket_b.bind(addr_b);
 
-    stack.register_connection(addr_a, addr_b, socket_a.tcb());
-    stack.register_connection(addr_b, addr_a, socket_b.tcb());
+    stack.register_connection(addr_a, addr_b, socket_a.socket_id());
+    stack.register_connection(addr_b, addr_a, socket_b.socket_id());
 
-    socket_a.tcb()->set_state(ESTABLISHED);
-    socket_b.tcb()->set_state(ESTABLISHED);
+    auto* tcb_a = stack.get_tcb(socket_a.socket_id());
+    auto* tcb_b = stack.get_tcb(socket_b.socket_id());
+    ASSERT_NE(tcb_a, nullptr);
+    ASSERT_NE(tcb_b, nullptr);
+
+    tcb_a->set_state(ESTABLISHED);
+    tcb_b->set_state(ESTABLISHED);
 
     // 3. Prepare test payload and write to Socket A's send buffer
     const uint8_t message[] = "Hello from Socket A!";
     size_t bytes_sent = socket_a.send({message, sizeof(message)});
     EXPECT_EQ(bytes_sent, sizeof(message));
-
 
     // 6. Socket B reads payload from its recv buffer
     uint8_t read_buf[128] = {};

@@ -12,13 +12,19 @@
 #include <array>
 #include <condition_variable>
 
+
 /** A blocking buffer, implemented as a Ring buffer */
 template<typename T, std::size_t Size>
 class BlockingBuffer {
+    friend struct TransmissionControlBlock;
+    friend class TcpStack;
 private:
     /** Blocking mechanism */
     std::condition_variable can_read_, can_write_;
     std::mutex mutex_;
+
+    /** Force wake up used by TCB to wake up closing socket */
+    bool is_forcefully_woken_up_ = false;
 
     /** State */
     size_t read_pos_ = 0;
@@ -27,6 +33,15 @@ private:
 
     /** The buffer itself */
     std::array<T, Size> buffer_;
+
+    /** Called by the TCB to force wake up the closing socket */
+    inline void force_wake_up_() {
+        is_forcefully_woken_up_ = true;
+
+        can_read_.notify_all();
+        can_write_.notify_all();
+    }
+
 public:
 
     /** Blocking write; implemented on a ring-buffer */
@@ -34,7 +49,7 @@ public:
         std::unique_lock lock(mutex_);
 
         can_write_.wait(lock, [this] {
-            return curr_len_ < Size;
+            return curr_len_ < Size || is_forcefully_woken_up_;
         });
 
         const auto available = Size - curr_len_;
@@ -57,7 +72,7 @@ public:
         std::unique_lock<std::mutex> lock(mutex_);
 
         can_read_.wait(lock, [this] {
-            return curr_len_ > 0;
+            return curr_len_ > 0 || is_forcefully_woken_up_;
         });
 
         const auto available = curr_len_;

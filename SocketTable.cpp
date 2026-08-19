@@ -1,27 +1,22 @@
 #include "SocketTable.h"
 
-TransmissionControlBlock* SocketTable::create_socket(TcpState state, IPv4Address src, IPv4Address dst) {
+uint64_t SocketTable::create_socket(TcpState state, IPv4Address src, IPv4Address dst) {
     std::lock_guard<std::mutex> lock(mutex_);
     uint64_t id = next_id_++;
     auto tcb = std::make_unique<TransmissionControlBlock>(state, src, dst);
-    TransmissionControlBlock* raw_ptr = tcb.get();
+    tcb->id = id;
     sockets_[id] = std::move(tcb);
-    return raw_ptr;
+    return id;
 }
 
-bool SocketTable::destroy_socket(TransmissionControlBlock* tcb) {
-    if (!tcb) return false;
+bool SocketTable::destroy_socket(uint64_t id) {
+    if (id == 0) return false;
     std::lock_guard<std::mutex> lock(mutex_);
-    for (auto it = sockets_.begin(); it != sockets_.end(); ++it) {
-        if (it->second.get() == tcb) {
-            sockets_.erase(it);
-            return true;
-        }
-    }
-    return false;
+    return sockets_.erase(id) > 0;
 }
 
 TransmissionControlBlock* SocketTable::find_socket(uint64_t id) const {
+    if (id == 0) return nullptr;
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = sockets_.find(id);
     if (it != sockets_.end()) {
@@ -30,7 +25,13 @@ TransmissionControlBlock* SocketTable::find_socket(uint64_t id) const {
     return nullptr;
 }
 
-size_t SocketTable::size() const noexcept {
+bool SocketTable::contains(uint64_t id) const {
+    if (id == 0) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    return sockets_.find(id) != sockets_.end();
+}
+
+size_t SocketTable::size() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return sockets_.size();
 }
