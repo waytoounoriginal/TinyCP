@@ -33,10 +33,10 @@ TEST(LoggerTest, DropsMessagesBelowThreshold) {
     Logger::instance().set_level(LogLevel::WARN);
 
     const std::string output = CaptureOutput([] {
-        Logger::instance().debug() << "hidden debug";
-        Logger::instance().info() << "hidden info";
-        Logger::instance().warn() << "keep warn";
-        Logger::instance().error() << "keep error";
+        DEBUG << "hidden debug";
+        INFO << "hidden info";
+        WARN << "keep warn";
+        ERROR << "keep error";
     });
 
     EXPECT_NE(output.find("[WARN] keep warn"), std::string::npos);
@@ -49,7 +49,7 @@ TEST(LoggerTest, DropsMessagesBelowThreshold) {
 
 TEST(LoggerTest, StreamsValues) {
     const std::string output = CaptureOutput([] {
-        Logger::instance().info() << "seq=" << 42 << ", ack=" << 0x1234;
+        INFO << "seq=" << 42 << ", ack=" << 0x1234;
     });
 
     EXPECT_NE(output.find("[INFO] seq=42, ack=4660"), std::string::npos);
@@ -57,7 +57,7 @@ TEST(LoggerTest, StreamsValues) {
 
 TEST(LoggerTest, PrintsTimestampedTaggedLine) {
     const std::string output = CaptureOutput([] {
-        Logger::instance().warn() << "hello";
+        WARN << "hello";
     });
 
     EXPECT_EQ(output.find("["), 0u);

@@ -181,9 +181,9 @@ size_t TcpStack::handle_passive_open_syn_(const IPv4Address& src, const IPv4Addr
     auto listener_tcb = listener_table_.find(dst.port);
     if (listener_tcb && packet.syn() && !packet.ack()) {
 
-        Logger::instance().info() << "[TcpStack] [1/3] Passive Open: Received SYN from " << src.port
-                                  << " -> Local Port " << dst.port
-                                  << " (SEQ=" << packet.seq_num_ntoh() << ")";
+        INFO << "[TcpStack] [1/3] Passive Open: Received SYN from " << src.port
+             << " -> Local Port " << dst.port
+             << " (SEQ=" << packet.seq_num_ntoh() << ")";
 
         // Allocate child TCB for incoming connection via SocketTable
         auto child_tcb = socket_table_.create_socket(TcpState::SYN_RECEIVED, dst, src);
@@ -198,8 +198,8 @@ size_t TcpStack::handle_passive_open_syn_(const IPv4Address& src, const IPv4Addr
         // Register connection 4-tuple (src = remote, dst = local)
         connection_table_.insert(src, dst, child_tcb);
 
-        Logger::instance().info() << "[TcpStack] [2/3] Responding with SYN-ACK to " << src.port
-                                  << " (ISS=" << child_tcb->SND.ISS << ", ACK=" << child_tcb->RCV.NXT << ")";
+        INFO << "[TcpStack] [2/3] Responding with SYN-ACK to " << src.port
+             << " (ISS=" << child_tcb->SND.ISS << ", ACK=" << child_tcb->RCV.NXT << ")";
 
         // Send SYN-ACK
         return send_control_packet_(child_tcb, /*syn=*/1, /*ack=*/1, /*rst=*/0, child_tcb->SND.ISS, child_tcb->RCV.NXT);
@@ -212,7 +212,7 @@ size_t TcpStack::handle_syn_sent_state_(const TcbNonOwningPtr& tcb, const IPv4Ad
     // 1. Process RST if set
     if (packet.rst()) {
         if (packet.ack() && packet.ack_num_ntoh() == tcb->SND.NXT) {
-            Logger::instance().info() << "[TcpStack] Connection reset by peer in SYN_SENT";
+            INFO << "[TcpStack] Connection reset by peer in SYN_SENT";
             tcb->set_state(TcpState::CLOSED);
         }
         return 0;
@@ -220,15 +220,15 @@ size_t TcpStack::handle_syn_sent_state_(const TcbNonOwningPtr& tcb, const IPv4Ad
 
     // 2. Check unacceptable ACK
     if (packet.ack() && packet.ack_num_ntoh() != tcb->SND.NXT) {
-        Logger::instance().warn() << "[TcpStack] SYN_SENT received unacceptable ACK: " << packet.ack_num_ntoh()
-                                  << " (expected " << tcb->SND.NXT << "). Transmitting RST.";
+        WARN << "[TcpStack] SYN_SENT received unacceptable ACK: " << packet.ack_num_ntoh()
+             << " (expected " << tcb->SND.NXT << "). Transmitting RST.";
         return send_control_packet_(tcb, /*syn=*/0, /*ack=*/0, /*rst=*/1, packet.ack_num_ntoh(), 0);
     }
 
     if (packet.syn() && packet.ack()) {
         // Normal 3-way handshake completion: SYN-ACK received in SYN_SENT
-        Logger::instance().info() << "[TcpStack] [2/3] Received SYN-ACK from " << src.port
-                                  << ". Transitioning state SYN_SENT -> ESTABLISHED.";
+        INFO << "[TcpStack] [2/3] Received SYN-ACK from " << src.port
+             << ". Transitioning state SYN_SENT -> ESTABLISHED.";
 
         tcb->RCV.IRS = packet.seq_num_ntoh();
         tcb->RCV.NXT = tcb->RCV.IRS + 1;
@@ -236,14 +236,14 @@ size_t TcpStack::handle_syn_sent_state_(const TcbNonOwningPtr& tcb, const IPv4Ad
 
         tcb->set_state(TcpState::ESTABLISHED);
 
-        Logger::instance().info() << "[TcpStack] [3/3] Sending final ACK to " << src.port;
+        INFO << "[TcpStack] [3/3] Sending final ACK to " << src.port;
 
         // Send the final ACK
         return send_control_packet_(tcb, /*syn=*/0, /*ack=*/1, /*rst=*/0, tcb->SND.NXT, tcb->RCV.NXT);
     } else if (packet.syn()) {
         // Simultaneous Open: Received bare SYN in SYN_SENT
-        Logger::instance().info() << "[TcpStack] Simultaneous Open: Received SYN from " << src.port
-                                  << ". Transitioning state SYN_SENT -> SYN_RECEIVED.";
+        INFO << "[TcpStack] Simultaneous Open: Received SYN from " << src.port
+             << ". Transitioning state SYN_SENT -> SYN_RECEIVED.";
 
         tcb->RCV.IRS = packet.seq_num_ntoh();
         tcb->RCV.NXT = tcb->RCV.IRS + 1;
@@ -253,7 +253,7 @@ size_t TcpStack::handle_syn_sent_state_(const TcbNonOwningPtr& tcb, const IPv4Ad
         // Transmit SYN-ACK segment: <SEQ=SND.ISS><ACK=RCV.NXT><CTL=SYN,ACK>
         return send_control_packet_(tcb, /*syn=*/1, /*ack=*/1, /*rst=*/0, tcb->SND.ISS, tcb->RCV.NXT);
     } else {
-        Logger::instance().warn() << "[TcpStack] Unknown packet in SYN_SENT state";
+        WARN << "[TcpStack] Unknown packet in SYN_SENT state";
         return 0;
     }
 }
@@ -262,7 +262,7 @@ size_t TcpStack::handle_syn_received_state_(const TcbNonOwningPtr& tcb, const IP
     if (!tcb) return 0;
     // 1. Handle incoming RST segment
     if (packet.rst()) {
-        Logger::instance().info() << "[TcpStack] Received RST in SYN_RECEIVED. Aborting connection.";
+        INFO << "[TcpStack] Received RST in SYN_RECEIVED. Aborting connection.";
         tcb->set_state(TcpState::CLOSED);
         connection_table_.erase(src, tcb->src_address);
         socket_table_.destroy_socket(tcb);
@@ -273,13 +273,13 @@ size_t TcpStack::handle_syn_received_state_(const TcbNonOwningPtr& tcb, const IP
 
     // Check ACK validity
     if (packet.ack_num_ntoh() != tcb->SND.NXT) {
-        Logger::instance().warn() << "[TcpStack] SYN_RECEIVED received invalid ACK number: " << packet.ack_num_ntoh()
-                                  << " (expected " << tcb->SND.NXT << ")";
+        WARN << "[TcpStack] SYN_RECEIVED received invalid ACK number: " << packet.ack_num_ntoh()
+             << " (expected " << tcb->SND.NXT << ")";
         return 0;
     }
 
-    Logger::instance().info() << "[TcpStack] Received ACK in SYN_RECEIVED from " << src.port
-                              << ". Handshake complete! Transitioning SYN_RECEIVED -> ESTABLISHED.";
+    INFO << "[TcpStack] Received ACK in SYN_RECEIVED from " << src.port
+         << ". Handshake complete! Transitioning SYN_RECEIVED -> ESTABLISHED.";
 
     tcb->SND.UNA = packet.ack_num_ntoh();
     tcb->set_state(TcpState::ESTABLISHED);

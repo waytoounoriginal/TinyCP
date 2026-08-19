@@ -5,6 +5,7 @@
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <utility>
 
 /** Log severity levels. */
 enum class LogLevel {
@@ -23,7 +24,7 @@ const char* LevelName(LogLevel level);
  * A singleton, like TunDevice. Messages are streamed with the usual
  * `operator<<` and flushed to std::cout with a timestamp + level tag:
  *
- *     Logger::instance().info() << "Connection established, seq=" << seq;
+ *     INFO << "Connection established, seq=" << seq;
  *
  * Lines below the configured threshold are dropped before printing.
  */
@@ -48,13 +49,21 @@ public:
     /** A single log line; the message is emitted on destruction. */
     class Line {
     public:
-        Line(LogLevel level) : level_{level} {}
+        explicit Line(LogLevel level) : level_{level}, active_{true} {}
+
+        Line(Line&& other) noexcept
+            : level_{other.level_}, stream_{std::move(other.stream_)}, active_{other.active_} {
+            other.active_ = false;
+        }
 
         Line(const Line&) = delete;
         Line& operator=(const Line&) = delete;
+        Line& operator=(Line&&) = delete;
 
         ~Line() {
-            Logger::instance().Write(level_, stream_.str());
+            if (active_) {
+                Logger::instance().Write(level_, stream_.str());
+            }
         }
 
         template <typename T>
@@ -63,9 +72,15 @@ public:
             return *this;
         }
 
+        Line& operator<<(std::ostream& (*manip)(std::ostream&)) {
+            stream_ << manip;
+            return *this;
+        }
+
     private:
         LogLevel level_;
         std::ostringstream stream_;
+        bool active_{true};
     };
 
     Line debug() const {
@@ -95,5 +110,40 @@ private:
     LogLevel level_ = LogLevel::INFO;
     std::mutex mutex_;
 };
+
+#ifdef ERROR
+#undef ERROR
+#endif
+#ifdef WARN
+#undef WARN
+#endif
+#ifdef INFO
+#undef INFO
+#endif
+#ifdef DEBUG
+#undef DEBUG
+#endif
+
+struct LogTag {
+    LogLevel level;
+
+    template <typename T>
+    Logger::Line operator<<(const T& value) const {
+        Logger::Line line(level);
+        line << value;
+        return line;
+    }
+
+    Logger::Line operator<<(std::ostream& (*manip)(std::ostream&)) const {
+        Logger::Line line(level);
+        line << manip;
+        return line;
+    }
+};
+
+inline constexpr LogTag DEBUG{LogLevel::DEBUG};
+inline constexpr LogTag INFO{LogLevel::INFO};
+inline constexpr LogTag WARN{LogLevel::WARN};
+inline constexpr LogTag ERROR{LogLevel::ERROR};
 
 #endif // TCP_FROM_SCRATCH_LOGGER_H
