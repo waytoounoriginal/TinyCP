@@ -4,6 +4,7 @@
 #include <sstream>
 #include <string>
 
+#define TCP_DEBUG_LOGGING 1
 #include "utils/Logger.h"
 
 namespace {

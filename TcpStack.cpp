@@ -11,7 +11,7 @@ TcpStack::TcpStack(TunDevice& tun_device)
 TcpStack::~TcpStack() {
     stop_();
     if (daemon_thread_.joinable()) {
-        daemon_thread_.detach();
+        daemon_thread_.join();
     }
 }
 

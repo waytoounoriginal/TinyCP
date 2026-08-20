@@ -124,6 +124,9 @@ private:
 #undef DEBUG
 #endif
 
+#if defined(TCP_DEBUG_LOGGING) || defined(DEBUG_LOGGING) || (!defined(NDEBUG) && !defined(DISABLE_LOGGING))
+#define TCP_LOGGING_ENABLED 1
+
 struct LogTag {
     LogLevel level;
 
@@ -145,5 +148,27 @@ inline constexpr LogTag DEBUG{LogLevel::DEBUG};
 inline constexpr LogTag INFO{LogLevel::INFO};
 inline constexpr LogTag WARN{LogLevel::WARN};
 inline constexpr LogTag ERROR{LogLevel::ERROR};
+
+#else
+#define TCP_LOGGING_ENABLED 0
+
+/** Zero-overhead no-op logging tag in Release/non-debug builds */
+struct NullLogTag {
+    template <typename T>
+    constexpr const NullLogTag& operator<<(const T&) const noexcept {
+        return *this;
+    }
+
+    constexpr const NullLogTag& operator<<(std::ostream& (*)(std::ostream&)) const noexcept {
+        return *this;
+    }
+};
+
+inline constexpr NullLogTag DEBUG{};
+inline constexpr NullLogTag INFO{};
+inline constexpr NullLogTag WARN{};
+inline constexpr NullLogTag ERROR{};
+
+#endif
 
 #endif // TCP_FROM_SCRATCH_LOGGER_H
