@@ -26,7 +26,6 @@
   * Non-blocking send() backed by BlockingBuffer with peek() (unsent data) and discard() (ACKed data).
   * Dynamic RCV.WND advertising and MSS (1460-byte) segmentation.
 * **Autonomous Loss Recovery:** Per-socket RTO tracking with retransmission of unacknowledged data (offset = 0, SND.UNA) on timeout.
-* **In-Memory Loopback Fast-Path:** Zero-syscall routing for local traffic with zero-heap FixedQueue ring buffers.
 * **Zero-Copy Packet Views:** Lightweight TcpPacketView and IPv4PacketView over raw byte buffers with Internet Checksum validation.
 
 ---
