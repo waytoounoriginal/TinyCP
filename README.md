@@ -1,133 +1,97 @@
-# T(iny)CP
+# TinyCP
 
-> **TinyCP** is an educational, high-performance userspace TCP/IP stack implemented from scratch in modern C++20, operating over a Linux virtual TUN interface (`/dev/net/tun`).
-
----
-
-## Features
-
-### 1. RFC 793 State Machine & Connection Lifecycle
-* **Active Open (`connect`) & Passive Open (`listen` / `accept`):** Full 3-way handshake (`SYN` $\to$ `SYN-ACK` $\to$ `ACK`) and simultaneous opening support.
-* **Graceful Teardown (`close`):** Complete 4-way FIN handshake supporting `FIN_WAIT_1`, `FIN_WAIT_2`, `CLOSE_WAIT`, `LAST_ACK`, and `CLOSED`.
-* **RFC 793 Reset Generation (`RST`):** Accurate reset generation for non-existent connections, port unreachability, and state discrepancies.
-
-### 2. Asynchronous Streaming & Sliding Window Flow Control
-* **Asynchronous `send()` Pipeline:** Non-blocking application transmission backed by thread-safe circular ring buffers ([`BlockingBuffer`](BlockingBuffer.h)).
-* **Sliding Window Flow Control:** Usable window calculation ($\text{usable\_window} = \text{SND.WND} - (\text{SND.NXT} - \text{SND.UNA})$) dynamically bounding transmission to peer capacity and MSS (1460 bytes).
-* **Dynamic Receive Window Advertising:** Continually advertises available `recv_buffer` capacity in every outgoing segment.
-* **Autonomous Background Retransmissions:** Daemon RTO tracking with retransmission of oldest unacknowledged bytes on timer expiry.
-
-### 3. Thread-Safe Modular Architecture
-* **Decoupled Tables:**
-  * [`SocketTable`](SocketTable.h): Owns and manages the lifecycle of `TransmissionControlBlock` (TCB) instances.
-  * [`ListenerTable`](ListenerTable.h): Routes incoming SYN packets on bound ports to listening sockets.
-  * [`ConnectionTable`](ConnectionTable.h): Fast 4-tuple lookup `(remote_ip:port, local_ip:port) -> socket_id`.
-* **Lockless Daemon Event Loop:** Polling lifecycle loop in [`TcpStack`](TcpStack.h) draining transmission queues and network interfaces with sub-millisecond latency.
-
-### 4. Zero-Copy Packet Serialization
-* **Packet Views:** [`IPv4PacketView`](IPv4.h) and [`TcpPacketView`](TcpPacket.h) provide zero-copy inspection of raw network buffers.
-* **Header Encoders:** [`IPv4Header`](IPv4.h) and [`TcpHeader`](TcpHeader.h) with automatic Internet checksum calculation.
+> A high-performance, userspace TCP/IP stack implemented from scratch in modern C++20, operating over a Linux virtual TUN interface (/dev/net/tun) or in-memory fast-path loopback.
 
 ---
 
-## Applications & Tools
+## Project Deliverables
 
-### HTTP GET Client (`http_client`)
-An HTTP/1.1 GET client running directly on top of TinyCP:
-
-```bash
-# General Syntax
-./http_client [IP] [PORT] [PATH] [HOST]
-
-# Example: Fetching local HTTP server
-sudo ./http_client 10.0.0.1 8080 / 10.0.0.1
-
-# Example: Fetching example.com (via NAT)
-sudo ./http_client 93.184.216.34 80 / example.com
-```
-
-### High-Speed Throughput Benchmark (`throughput_benchmark`)
-A dedicated bandwidth benchmark tool capable of streaming arbitrary Megabytes/Gigabytes of data across the TCP sliding window with real-time throughput metrics (MB/s and Gbps) and 100% data integrity checksum verification:
-
-```bash
-# Stream 100 MB of data through TinyCP:
-sudo ./throughput_benchmark --mb 100
-
-# Stream 1 GB of data:
-sudo ./throughput_benchmark --gb 1
-
-# Bidirectional echo stream with 32 KB chunk buffers:
-sudo ./throughput_benchmark --mb 200 --chunk 32768 --bidirectional
-```
-
-### Concurrency & Multi-Socket Load Tests (`load_test`)
-* `SingleStreamBulkThroughput`: Pipelined high-volume bidirectional throughput testing.
-* `ConcurrentMultiSocketStress`: Concurrent multi-client client/server stress testing with automated error and retry tracking.
-
-```bash
-sudo ./load_test --streams 8 --per-stream 100 --payload 1024
-```
+| Deliverable | Type | Description |
+| :--- | :--- | :--- |
+| **tinycp_core** | Static Library | Core RFC 793 state machine, sliding window flow control, RTO retransmissions, and socket table routing. |
+| **http_client** | Executable | HTTP/1.1 GET client running on userspace TCP, fetching web pages over TUN/NAT. |
+| **throughput_benchmark** | Executable | Bandwidth tool measuring MB/s and Gbps with streaming checksum verification. |
+| **load_test** | Executable | High-concurrency multi-client stress test with automated error tracking. |
+| **packet_dump** | Executable | Real-time TCP/IPv4 packet sniffer and header analyzer on tun0. |
+| **setup_tun.sh** | Script | Automated tun0 interface setup, IP forwarding, and iptables NAT masquerading. |
+| **GoogleTest Suite** | 12 Test Targets | Automated test suite validating RFC 793 states, teardown, loss recovery, and queues. |
 
 ---
 
-## Quickstart & TUN Interface Setup
+## Key Features and Architecture
 
-TinyCP communicates with the host operating system and external networks via a virtual TUN device (`tun0`).
+* **RFC 793 Connection Lifecycle:** 3-way handshake (SYN -> SYN-ACK -> ACK), simultaneous open, 4-way graceful teardown (FIN), and RST generation.
+* **Asynchronous Sliding Window:**
+  * Usable window calculation: usable_window = SND.WND - (SND.NXT - SND.UNA).
+  * Non-blocking send() backed by BlockingBuffer with peek() (unsent data) and discard() (ACKed data).
+  * Dynamic RCV.WND advertising and MSS (1460-byte) segmentation.
+* **Autonomous Loss Recovery:** Per-socket RTO tracking with retransmission of unacknowledged data (offset = 0, SND.UNA) on timeout.
+* **In-Memory Loopback Fast-Path:** Zero-syscall routing for local traffic with zero-heap FixedQueue ring buffers.
+* **Zero-Copy Packet Views:** Lightweight TcpPacketView and IPv4PacketView over raw byte buffers with Internet Checksum validation.
 
-### 1. Configure `tun0` and NAT Routing
+---
 
-Use the automated helper script to initialize `tun0`, configure IP forwarding, and set up `iptables` NAT / Masquerading:
+## Quickstart
+
+### 1. Configure the TUN Interface
 
 ```bash
-# Basic setup (tun0 on 10.0.0.1/24 with outbound NAT):
+# Setup tun0 on 10.0.0.1/24 with outbound NAT:
 sudo ./setup_tun.sh
 
-# Optional: Also configure an inbound port forward (e.g. forward port 9090 to TinyCP):
+# Optional: Also configure an inbound port forward (e.g. forward host port 9090 to TinyCP):
 sudo ./setup_tun.sh tun0 10.0.0.1/24 9090
 ```
 
----
-
-## Building & Testing
-
-### Prerequisites
-* C++20 compliant compiler (`gcc` 11+, `clang` 13+)
-* `cmake` 3.20+
-* Linux environment or WSL2 with TUN/TAP support
-
-### Build Commands
+### 2. Build the Project
 
 ```bash
-# Configure
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-
-# Build
 cmake --build build -j$(nproc)
+```
 
-# Run Test Suite
+### 3. Run Applications and Benchmarks
+
+```bash
+# Fetch a webpage via userspace TCP HTTP client:
+sudo ./build/http_client 93.184.216.34 80 / example.com
+
+# Run 100 MB Throughput Benchmark:
+sudo ./build/throughput_benchmark --mb 100
+
+# Run Multi-Stream Concurrency Stress Test:
+sudo ./build/load_test --streams 8 --per-stream 100
+```
+
+### 4. Run Automated Test Suite
+
+```bash
 ctest --test-dir build --output-on-failure
 ```
 
 ---
 
-## Project Structure
+## Source Tree
 
 ```
 .
-├── BlockingBuffer.h           # Thread-safe ring buffer with peek/discard
-├── ConnectionTable.h/.cpp     # 4-tuple connection routing table
-├── ListenerTable.h/.cpp       # Listening port routing table
-├── SocketTable.h/.cpp         # TCB memory ownership table
-├── TcpStack.h/.cpp            # TCP stack core, daemon event loop, state machine
-├── TcpSocket.h/.cpp           # User-facing socket API (bind, connect, send, recv, close)
-├── TransmissionControlBlock.h # RFC 793 TCB sequence and window state
-├── IPv4.h                     # IPv4 headers, addresses, checksums, packet views
-├── TcpHeader.h                # TCP header serialization and flags
-├── TcpPacket.h                # TCP packet representations and views
-├── TunDevice.h/.cpp           # Linux /dev/net/tun interface wrapper
-├── http_client.cpp            # HTTP GET client application
-├── setup_tun.sh               # TUN interface setup & iptables NAT script
-└── tests/                     # Comprehensive Google Test suite
+|-- BlockingBuffer.h           # Thread-safe circular ring buffer (peek/discard)
+|-- ConnectionTable.h/.cpp     # 4-tuple connection routing table
+|-- ListenerTable.h/.cpp       # Listening port routing table
+|-- SocketTable.h/.cpp         # TCB lifetime management
+|-- TcpStack.h/.cpp            # TCP stack core, daemon event loop, state machine
+|-- TcpSocket.h/.cpp           # POSIX-like socket API (bind, connect, send, recv, close)
+|-- TransmissionControlBlock.h # RFC 793 TCB sequence and window state
+|-- IPv4.h                     # IPv4 headers, addresses, checksums, packet views
+|-- TcpHeader.h / TcpPacket.h  # TCP header encoders and packet views
+|-- TunDevice.h/.cpp           # Linux /dev/net/tun interface wrapper
+|-- http_client.cpp            # HTTP GET client application
+|-- throughput_benchmark.cpp   # Bulk bandwidth and integrity benchmark tool
+|-- load_test.cpp              # Multi-client load test binary
+|-- PacketDump.cpp             # Packet analyzer tool
+|-- setup_tun.sh               # TUN interface setup and iptables NAT script
+|-- utils/                     # Logger, Checksum, and FixedQueue utilities
+`-- tests/                     # 12 Google Test targets
 ```
 
 ---
