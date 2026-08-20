@@ -46,9 +46,27 @@ sudo ./http_client 10.0.0.1 8080 / 10.0.0.1
 sudo ./http_client 93.184.216.34 80 / example.com
 ```
 
-### High-Concurrency Benchmarks & Stress Tests
+### High-Speed Throughput Benchmark (`throughput_benchmark`)
+A dedicated bandwidth benchmark tool capable of streaming arbitrary Megabytes/Gigabytes of data across the TCP sliding window with real-time throughput metrics (MB/s and Gbps) and 100% data integrity checksum verification:
+
+```bash
+# Stream 100 MB of data through TinyCP:
+sudo ./throughput_benchmark --mb 100
+
+# Stream 1 GB of data:
+sudo ./throughput_benchmark --gb 1
+
+# Bidirectional echo stream with 32 KB chunk buffers:
+sudo ./throughput_benchmark --mb 200 --chunk 32768 --bidirectional
+```
+
+### Concurrency & Multi-Socket Load Tests (`load_test`)
 * `SingleStreamBulkThroughput`: Pipelined high-volume bidirectional throughput testing.
 * `ConcurrentMultiSocketStress`: Concurrent multi-client client/server stress testing with automated error and retry tracking.
+
+```bash
+sudo ./load_test --streams 8 --per-stream 100 --payload 1024
+```
 
 ---
 

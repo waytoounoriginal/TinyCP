@@ -38,6 +38,9 @@ target_link_libraries(http_client PRIVATE tinycp_core)
 add_executable(load_test load_test.cpp)
 target_link_libraries(load_test PRIVATE tinycp_core)
 
+add_executable(throughput_benchmark throughput_benchmark.cpp)
+target_link_libraries(throughput_benchmark PRIVATE tinycp_core)
+
 # Testing Suite
 enable_testing()
 
@@ -81,3 +84,4 @@ add_tinycp_test(rfc793_scenarios_tests tests/Rfc793ScenariosTest.cpp)
 add_tinycp_test(tcp_teardown_tests tests/TcpTeardownTest.cpp)
 add_tinycp_test(http_client_tests tests/HttpClientTest.cpp)
 add_tinycp_test(load_tests tests/LoadTest.cpp)
+add_tinycp_test(throughput_tests tests/ThroughputTest.cpp)

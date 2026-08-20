@@ -50,6 +50,10 @@ private:
     /** Queue for processing socket IDs with pending outbound data */
     std::queue<uint64_t> dirty_socket_ids_ {};
 
+    /** Fast-path in-memory loopback queue for local traffic */
+    std::mutex loopback_mutex_;
+    std::queue<std::vector<uint8_t>> loopback_packet_queue_ {};
+
     TunDevice& tun_device_;
     std::thread daemon_thread_;
     std::atomic_bool is_running_ {true};

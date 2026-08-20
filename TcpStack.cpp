@@ -153,6 +153,24 @@ void TcpStack::lifecycle_() {
             process_dirty_blocks_();
         }
 
+        // Drain fast-path in-memory loopback queue (local inter-socket traffic)
+        std::queue<std::vector<uint8_t>> loopback_batch;
+        {
+            std::lock_guard<std::mutex> lock(loopback_mutex_);
+            if (!loopback_packet_queue_.empty()) {
+                std::swap(loopback_batch, loopback_packet_queue_);
+            }
+        }
+
+        while (!loopback_batch.empty()) {
+            did_work = true;
+            auto& raw_pkt = loopback_batch.front();
+            process_incoming_packet_({raw_pkt.data(), raw_pkt.size()});
+            loopback_batch.pop();
+            process_dirty_blocks_();
+        }
+
+        // Drain incoming packets from TUN device (external network traffic)
         while (read_incoming_packets_() > 0) {
             did_work = true;
             process_dirty_blocks_();
@@ -647,6 +665,17 @@ size_t TcpStack::write_packet_(IPv4Address src_address, IPv4Address dst_address,
     }
 #endif
     
+    // Fast-path: If target is local stack IP or loopback, route in memory without syscalls
+    bool is_local = (src_address.address == dst_address.address) ||
+                    ((dst_address.address >> 24) == 127) ||
+                    (dst_address.address == local_address().address);
+
+    if (is_local) {
+        std::lock_guard<std::mutex> lock(loopback_mutex_);
+        loopback_packet_queue_.emplace(ip_packet_buffer, ip_packet_buffer + ip_payload_size);
+        return ip_payload_size;
+    }
+
     return tun_device_.tun_write(reinterpret_cast<const char *>(ip_packet_buffer), ip_payload_size);
 }
 
