@@ -642,6 +642,9 @@ size_t TcpStack::write_packet_(IPv4Address src_address, IPv4Address dst_address,
     if (outbound_interceptor_) {
         outbound_interceptor_(src_address, dst_address, packet);
     }
+    if (packet_drop_predicate_ && packet_drop_predicate_(src_address, dst_address, packet)) {
+        return ip_payload_size; // Simulate packet loss on physical wire
+    }
 #endif
     
     return tun_device_.tun_write(reinterpret_cast<const char *>(ip_packet_buffer), ip_payload_size);

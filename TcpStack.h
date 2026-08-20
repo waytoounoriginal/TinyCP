@@ -154,6 +154,7 @@ public:
 #ifdef TCP_STACK_TESTING
 public:
     using OutboundPacketCallback = std::function<void(IPv4Address src, IPv4Address dst, const TcpPacket& packet)>;
+    using PacketDropPredicate = std::function<bool(IPv4Address src, IPv4Address dst, const TcpPacket& packet)>;
 
     /** In-memory packet injection helper for testing without TUN device */
     size_t inject_packet(std::span<const uint8_t> raw_bytes) {
@@ -165,6 +166,11 @@ public:
         outbound_interceptor_ = std::move(callback);
     }
 
+    /** Outbound packet drop predicate for simulating transient loss */
+    void set_packet_drop_predicate(PacketDropPredicate predicate) noexcept {
+        packet_drop_predicate_ = std::move(predicate);
+    }
+
     /** Simulates sudden node crash by wiping connection TCB without FIN/RST */
     void simulate_node_crash(IPv4Address remote_addr, IPv4Address local_addr) {
         connection_table_.erase(remote_addr, local_addr);
@@ -172,6 +178,7 @@ public:
 
 private:
     OutboundPacketCallback outbound_interceptor_;
+    PacketDropPredicate packet_drop_predicate_;
 #endif
 };
 

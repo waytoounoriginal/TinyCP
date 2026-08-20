@@ -185,8 +185,9 @@ TEST(TcpSocketTest, RetransmissionSuccessAfterTransientDrop) {
     TcpSocket socket_b{stack};
     socket_b.bind(addr_b);
 
-    // Register Socket A, but withhold Socket B registration to simulate initial packet drop
+    // Register bidirectional routes
     stack.register_connection(addr_a, addr_b, socket_a.socket_id());
+    stack.register_connection(addr_b, addr_a, socket_b.socket_id());
 
     auto* tcb_a = stack.get_tcb(socket_a.socket_id());
     auto* tcb_b = stack.get_tcb(socket_b.socket_id());
@@ -196,27 +197,42 @@ TEST(TcpSocketTest, RetransmissionSuccessAfterTransientDrop) {
     tcb_a->set_state(ESTABLISHED);
     tcb_b->set_state(ESTABLISHED);
 
-    // Fast RTO (30ms)
+    // Initialize aligned sequence numbers
+    tcb_a->RCV.IRS = 1000;
+    tcb_a->RCV.NXT = 1000;
+    tcb_a->SND.ISS = 2000;
+    tcb_a->SND.UNA = 2000;
+    tcb_a->SND.NXT = 2000;
+
+    tcb_b->RCV.IRS = 2000;
+    tcb_b->RCV.NXT = 2000;
+    tcb_b->SND.ISS = 1000;
+    tcb_b->SND.UNA = 1000;
+    tcb_b->SND.NXT = 1000;
+
+    // Fast RTO (30ms) for snappy test execution
     tcb_a->RTO = std::chrono::milliseconds(30);
     tcb_b->RTO = std::chrono::milliseconds(30);
 
     const uint8_t message[] = "Retransmitted successfully!";
     std::atomic<int> transmission_count{0};
 
-    stack.set_outbound_interceptor([&](IPv4Address src, IPv4Address dst, const TcpPacket& packet) {
+    // Drop only the 1st transmission attempt of the payload on the wire
+    stack.set_packet_drop_predicate([&](IPv4Address src, IPv4Address dst, const TcpPacket& packet) {
         if (packet.payload.size() > 0) {
             int count = ++transmission_count;
-            // On the 2nd attempt (1st retry), restore route to Socket B so it receives the data and ACKs
-            if (count == 2) {
-                stack.register_connection(addr_b, addr_a, socket_b.socket_id());
+            if (count == 1) {
+                // Drop attempt 1
+                return true;
             }
         }
+        return false;
     });
 
     size_t bytes_sent = socket_a.send({message, sizeof(message)});
     EXPECT_EQ(bytes_sent, sizeof(message));
 
-    // Socket B successfully receives the payload after background retransmission
+    // Socket B receives the payload once background retransmission succeeds
     uint8_t read_buf[128] = {};
     size_t bytes_read = socket_b.recv({read_buf, sizeof(read_buf)});
     EXPECT_EQ(bytes_read, sizeof(message));
