@@ -60,7 +60,7 @@ private:
     /** Lookup socket in active connections table */
     uint64_t find_connections_tcb_(IPv4Address src_address, IPv4Address dst_address);
 
-    TcpPacket create_tcp_header_packet_(const TransmissionControlBlock* tcb, std::span<const uint8_t> data) noexcept;
+    TcpPacket create_writer_tcp_packet_(const TransmissionControlBlock* tcb, std::span<const uint8_t> data) noexcept;
 
     void process_block_(uint64_t socket_id);
 

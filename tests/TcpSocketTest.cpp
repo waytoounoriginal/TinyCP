@@ -39,7 +39,7 @@ TEST(TcpSocketTest, TwoSocketsCommunicatingViaInFlightPackets) {
 
     // 3. Prepare test payload and write to Socket A's send buffer
     const uint8_t message[] = "Hello from Socket A!";
-    size_t bytes_sent = socket_a.send({message, sizeof(message)});
+    size_t bytes_sent = socket_a.send({message, sizeof(message)}, 3);
     EXPECT_EQ(bytes_sent, sizeof(message));
 
     // 6. Socket B reads payload from its recv buffer
@@ -76,6 +76,156 @@ TEST(TcpSocketTest, ThreeWayHandshakeStateTransitions) {
 
     client_thread.join();
     server_thread.join();
+}
+
+TEST(TcpSocketTest, FullLifecycleConnectSendRecvClose) {
+    TunDevice tun;
+    TcpStack stack{tun};
+
+    IPv4Address server_addr = IPv4Address::from_string("10.0.0.3:9090");
+
+    TcpSocket server_socket{stack};
+    server_socket.bind(server_addr);
+    server_socket.listen();
+
+    EXPECT_EQ(server_socket.state(), TcpState::LISTEN);
+
+    TcpSocket client_socket{stack};
+
+    const uint8_t client_msg[] = "Hello from client!";
+    const uint8_t server_msg[] = "Hello from server!";
+
+    std::thread server_thread([&]() {
+        // 1. Accept incoming connection
+        TcpSocket accepted_socket = server_socket.accept();
+        EXPECT_EQ(accepted_socket.state(), TcpState::ESTABLISHED);
+
+        // 2. Receive payload from client
+        uint8_t server_recv_buf[128] = {};
+        size_t bytes_read = accepted_socket.recv({server_recv_buf, sizeof(server_recv_buf)});
+        EXPECT_EQ(bytes_read, sizeof(client_msg));
+        EXPECT_STREQ(reinterpret_cast<char*>(server_recv_buf), reinterpret_cast<const char*>(client_msg));
+
+        // 3. Send response back to client
+        size_t bytes_sent = accepted_socket.send({server_msg, sizeof(server_msg)});
+        EXPECT_EQ(bytes_sent, sizeof(server_msg));
+
+        // 5. Close accepted socket
+        accepted_socket.close();
+    });
+
+    std::thread client_thread([&]() {
+        // 1. Connect to server
+        client_socket.connect(server_addr);
+        EXPECT_EQ(client_socket.state(), TcpState::ESTABLISHED);
+
+        // 2. Send payload to server
+        size_t bytes_sent = client_socket.send({client_msg, sizeof(client_msg)});
+        EXPECT_EQ(bytes_sent, sizeof(client_msg));
+
+        // 3. Receive response from server
+        uint8_t client_recv_buf[128] = {};
+        size_t bytes_read = client_socket.recv({client_recv_buf, sizeof(client_recv_buf)});
+        EXPECT_EQ(bytes_read, sizeof(server_msg));
+        EXPECT_STREQ(reinterpret_cast<char*>(client_recv_buf), reinterpret_cast<const char*>(server_msg));
+
+        // 4. Close client connection
+        client_socket.close();
+    });
+
+    client_thread.join();
+    server_thread.join();
+}
+
+TEST(TcpSocketTest, RetransmissionExhaustionOnUnresponsivePeer) {
+    TunDevice tun;
+    TcpStack stack{tun};
+
+    IPv4Address client_addr = IPv4Address::from_string("10.0.0.2:8080");
+    IPv4Address dead_peer_addr = IPv4Address::from_string("10.0.0.99:9999");
+
+    TcpSocket socket{stack};
+    socket.bind(client_addr);
+    stack.register_connection(client_addr, dead_peer_addr, socket.socket_id());
+
+    auto* tcb = stack.get_tcb(socket.socket_id());
+    ASSERT_NE(tcb, nullptr);
+    tcb->set_state(ESTABLISHED);
+
+    // Short RTO for fast test execution (30ms per attempt)
+    tcb->RTO = std::chrono::milliseconds(30);
+
+    int send_attempts = 0;
+    stack.set_outbound_interceptor([&](IPv4Address src, IPv4Address dst, const TcpPacket& packet) {
+        if (packet.payload.size() > 0) {
+            send_attempts++;
+        }
+    });
+
+    const uint8_t message[] = "Unacknowledged payload";
+    constexpr int32_t kMaxRetries = 2;
+
+    // Send payload to unresponsive peer and verify retries are exhausted
+    size_t result = socket.send({message, sizeof(message)}, kMaxRetries);
+
+    // Initial transmission + kMaxRetries retransmissions = 3 total attempts
+    EXPECT_EQ(send_attempts, kMaxRetries + 1);
+    EXPECT_NE(result, sizeof(message));
+}
+
+TEST(TcpSocketTest, RetransmissionSuccessAfterTransientDrop) {
+    TunDevice tun;
+    TcpStack stack{tun};
+
+    IPv4Address addr_a = IPv4Address::from_string("10.0.0.2:8080");
+    IPv4Address addr_b = IPv4Address::from_string("10.0.0.3:9090");
+
+    TcpSocket socket_a{stack};
+    socket_a.bind(addr_a);
+
+    TcpSocket socket_b{stack};
+    socket_b.bind(addr_b);
+
+    // Register Socket A, but withhold Socket B registration to simulate initial packet drop
+    stack.register_connection(addr_a, addr_b, socket_a.socket_id());
+
+    auto* tcb_a = stack.get_tcb(socket_a.socket_id());
+    auto* tcb_b = stack.get_tcb(socket_b.socket_id());
+    ASSERT_NE(tcb_a, nullptr);
+    ASSERT_NE(tcb_b, nullptr);
+
+    tcb_a->set_state(ESTABLISHED);
+    tcb_b->set_state(ESTABLISHED);
+
+    // Fast RTO (40ms)
+    tcb_a->RTO = std::chrono::milliseconds(40);
+    tcb_b->RTO = std::chrono::milliseconds(40);
+
+    const uint8_t message[] = "Retransmitted successfully!";
+    int transmission_count = 0;
+
+    stack.set_outbound_interceptor([&](IPv4Address src, IPv4Address dst, const TcpPacket& packet) {
+        if (packet.payload.size() > 0) {
+            transmission_count++;
+            // On the 2nd attempt (1st retry), restore route to Socket B so it receives the data and ACKs
+            if (transmission_count == 2) {
+                stack.register_connection(addr_b, addr_a, socket_b.socket_id());
+            }
+        }
+    });
+
+    // Socket A sends with up to 3 retries
+    size_t bytes_sent = socket_a.send({message, sizeof(message)}, /*retries=*/3);
+
+    // Verifies send succeeded on retry 1 (transmission_count == 2)
+    EXPECT_EQ(bytes_sent, sizeof(message));
+    EXPECT_EQ(transmission_count, 2);
+
+    // Socket B successfully receives the payload
+    uint8_t read_buf[128] = {};
+    size_t bytes_read = socket_b.recv({read_buf, sizeof(read_buf)});
+    EXPECT_EQ(bytes_read, sizeof(message));
+    EXPECT_STREQ(reinterpret_cast<char*>(read_buf), reinterpret_cast<const char*>(message));
 }
 
 } // namespace

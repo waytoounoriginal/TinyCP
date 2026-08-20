@@ -51,11 +51,21 @@ constexpr const char* TCP_STATE_TO_STRING(TcpState state) noexcept {
 #include <mutex>
 #include <queue>
 #include <memory>
+#include <chrono>
+
+
+using timestamp_t = std::chrono::high_resolution_clock::time_point;
 
 /** The control block structure of the socket
 *   Holds the internal state of the socket
 */
 struct TransmissionControlBlock {
+    /** Last written to */
+    timestamp_t last_written;
+
+    /** After writing we check if we have recived and ack */
+    bool has_recived_ack = false;
+
     /** Unique socket identifier */
     uint64_t id = 0;
 
@@ -94,21 +104,8 @@ struct TransmissionControlBlock {
                     IRS = 0; /* Initial receive sequence number */
     } RCV;
 
-    /** Current Segment Variables */
-    struct {
-        uint32_t    SEQ = 0, /* Segment Seq nr */
-                    ACK = 0, /* Segment Ack nr */
-                    LEN = 0, /* Segment Len */
-                    WND = 0, /* Segment Window */
-                    UP = 0,  /* Segment urgent pointer */
-                    PRC = 0; /* Segment precedence value */
-    } SEG;
-
     /** Retransmission timeout */
-    uint32_t RTO = 200;
-
-    /** Timestamp of the retransmission timer */
-    uint64_t retransmission_timer = 0;
+    std::chrono::milliseconds RTO{10000};
 
     /** User timeout */
     uint64_t user_timeout = 0;

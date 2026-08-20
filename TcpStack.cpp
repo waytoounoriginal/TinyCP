@@ -24,12 +24,16 @@ uint64_t TcpStack::find_connections_tcb_(IPv4Address src_address, IPv4Address ds
     return connection_table_.find(src_address, dst_address);
 }
 
-TcpPacket TcpStack::create_tcp_header_packet_(const TransmissionControlBlock* tcb, std::span<const uint8_t> data) noexcept {
+TcpPacket TcpStack::create_writer_tcp_packet_(const TransmissionControlBlock* tcb, std::span<const uint8_t> data) noexcept {
     TcpHeader header{};
     header.set_source_port(tcb->src_address.port);
     header.set_dest_port(tcb->dst_address.port);
     header.set_data_offset(5);
-    header.set_syn(1);
+
+    header.set_ack(1);
+    header.set_seq_num(tcb->SND.NXT);
+    header.set_ack_num(tcb->RCV.NXT);
+    header.set_window(tcb->RCV.WND); // e.g. 65535
 
     TcpPacket packet{};
     packet.header = header;
@@ -41,6 +45,9 @@ void TcpStack::process_block_(uint64_t socket_id) {
     auto* tcb = get_tcb(socket_id);
     if (!tcb) return;
 
+    // Write the timestamp
+    tcb->last_written = std::chrono::system_clock::now();
+
     if (tcb->current_state == TcpState::SYN_SENT) {
         send_control_packet_(tcb, /*syn=*/1, /*ack=*/0, /*rst=*/0, /*fin=*/0, tcb->SND.ISS, 0);
         return;
@@ -48,11 +55,12 @@ void TcpStack::process_block_(uint64_t socket_id) {
 
     uint8_t tcp_packet_buffer[MAX_IPV4_PACKET_SIZE];
     auto read_size = tcb->send_buffer.read({tcp_packet_buffer, MAX_IPV4_PACKET_SIZE});
-    const auto packet = create_tcp_header_packet_(
+    const auto packet = create_writer_tcp_packet_(
         tcb,
         {tcp_packet_buffer, read_size}
     );
 
+    tcb->SND.NXT += read_size;
     write_packet_(tcb->src_address, tcb->dst_address, packet);
 }
 
@@ -315,7 +323,12 @@ size_t TcpStack::handle_syn_received_state_(uint64_t socket_id, const IPv4Addres
         listener_tcb->state_cv.notify_all();
     }
 
-    return send_control_packet_(tcb, /*syn=*/0, /*ack=*/1, /*rst=*/0, /*fin=*/0, tcb->SND.NXT, tcb->RCV.NXT);
+    // Handling simultaneous opening scenario - during handshake
+    if (packet.syn() && packet.ack()) {
+        return send_control_packet_(tcb, /*syn=*/0, /*ack=*/1, /*rst=*/0, /*fin=*/0, tcb->SND.NXT, tcb->RCV.NXT);
+    }
+
+    return 0;
 }
 
 size_t TcpStack::handle_established_state_(uint64_t socket_id, const TcpPacketView& packet) {
@@ -339,8 +352,29 @@ size_t TcpStack::handle_established_state_(uint64_t socket_id, const TcpPacketVi
         return 1;
     }
 
+    // Handle the sender getting ack
+    if (packet.ack() && packet.payload().size() == 0) {
+
+        // Set UNA
+        tcb->SND.UNA = packet.ack_num_ntoh();
+
+        {
+            std::unique_lock lk(tcb->state_mutex);
+
+            tcb->has_recived_ack = true;
+            tcb->state_cv.notify_all();
+        }
+
+        return 0;
+    }
+
     if (packet.payload().size() > 0) {
-        return tcb->recv_buffer.write(packet.payload());
+
+        tcb->RCV.NXT += packet.payload().size();
+        tcb->recv_buffer.write(packet.payload());
+
+        // Send an ack
+        return send_control_packet_(tcb, 0, 1, 0, 0,tcb->SND.NXT, tcb->RCV.NXT);
     }
     return 0;
 }

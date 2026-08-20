@@ -53,7 +53,7 @@ public:
     TcpSocket accept();
 
     /** Writes payload data to send buffer and notifies stack */
-    size_t send(std::span<const uint8_t> data) const;
+    size_t send(std::span<const uint8_t> data, int32_t retries = 3) const;
 
     /** Reads payload data from receive buffer */
     size_t recv(std::span<uint8_t> data) const;
