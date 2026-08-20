@@ -1,6 +1,6 @@
 # TinyCP
 
-> A high-performance, userspace TCP/IP stack implemented from scratch in modern C++20, operating over a Linux virtual TUN interface (/dev/net/tun) or in-memory fast-path loopback.
+> A short implementation of an userspace TCP/IP stack, strictly covering RFC 793
 
 ---
 
