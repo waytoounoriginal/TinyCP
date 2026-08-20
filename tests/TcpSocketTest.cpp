@@ -152,10 +152,10 @@ TEST(TcpSocketTest, RetransmissionExhaustionOnUnresponsivePeer) {
     ASSERT_NE(tcb, nullptr);
     tcb->set_state(ESTABLISHED);
 
-    // Short RTO for fast test execution (30ms per attempt)
-    tcb->RTO = std::chrono::milliseconds(30);
+    // Short RTO for fast test execution (20ms per attempt)
+    tcb->RTO = std::chrono::milliseconds(20);
 
-    int send_attempts = 0;
+    std::atomic<int> send_attempts{0};
     stack.set_outbound_interceptor([&](IPv4Address src, IPv4Address dst, const TcpPacket& packet) {
         if (packet.payload.size() > 0) {
             send_attempts++;
@@ -163,14 +163,13 @@ TEST(TcpSocketTest, RetransmissionExhaustionOnUnresponsivePeer) {
     });
 
     const uint8_t message[] = "Unacknowledged payload";
-    constexpr int32_t kMaxRetries = 2;
+    size_t result = socket.send({message, sizeof(message)});
+    EXPECT_EQ(result, sizeof(message));
 
-    // Send payload to unresponsive peer and verify retries are exhausted
-    size_t result = socket.send({message, sizeof(message)}, kMaxRetries);
+    // Wait for 3 RTO cycles (initial + retransmissions)
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
 
-    // Initial transmission + kMaxRetries retransmissions = 3 total attempts
-    EXPECT_EQ(send_attempts, kMaxRetries + 1);
-    EXPECT_NE(result, sizeof(message));
+    EXPECT_GE(send_attempts.load(), 3);
 }
 
 TEST(TcpSocketTest, RetransmissionSuccessAfterTransientDrop) {
@@ -197,35 +196,32 @@ TEST(TcpSocketTest, RetransmissionSuccessAfterTransientDrop) {
     tcb_a->set_state(ESTABLISHED);
     tcb_b->set_state(ESTABLISHED);
 
-    // Fast RTO (40ms)
-    tcb_a->RTO = std::chrono::milliseconds(40);
-    tcb_b->RTO = std::chrono::milliseconds(40);
+    // Fast RTO (30ms)
+    tcb_a->RTO = std::chrono::milliseconds(30);
+    tcb_b->RTO = std::chrono::milliseconds(30);
 
     const uint8_t message[] = "Retransmitted successfully!";
-    int transmission_count = 0;
+    std::atomic<int> transmission_count{0};
 
     stack.set_outbound_interceptor([&](IPv4Address src, IPv4Address dst, const TcpPacket& packet) {
         if (packet.payload.size() > 0) {
-            transmission_count++;
+            int count = ++transmission_count;
             // On the 2nd attempt (1st retry), restore route to Socket B so it receives the data and ACKs
-            if (transmission_count == 2) {
+            if (count == 2) {
                 stack.register_connection(addr_b, addr_a, socket_b.socket_id());
             }
         }
     });
 
-    // Socket A sends with up to 3 retries
-    size_t bytes_sent = socket_a.send({message, sizeof(message)}, /*retries=*/3);
-
-    // Verifies send succeeded on retry 1 (transmission_count == 2)
+    size_t bytes_sent = socket_a.send({message, sizeof(message)});
     EXPECT_EQ(bytes_sent, sizeof(message));
-    EXPECT_EQ(transmission_count, 2);
 
-    // Socket B successfully receives the payload
+    // Socket B successfully receives the payload after background retransmission
     uint8_t read_buf[128] = {};
     size_t bytes_read = socket_b.recv({read_buf, sizeof(read_buf)});
     EXPECT_EQ(bytes_read, sizeof(message));
     EXPECT_STREQ(reinterpret_cast<char*>(read_buf), reinterpret_cast<const char*>(message));
+    EXPECT_GE(transmission_count.load(), 2);
 }
 
 } // namespace

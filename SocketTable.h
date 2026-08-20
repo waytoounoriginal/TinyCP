@@ -38,6 +38,17 @@ public:
 
     /** Returns current number of active sockets */
     size_t size() const;
+
+    /** Iterates over all active sockets */
+    template <typename Func>
+    void for_each_socket(Func&& f) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& [id, tcb] : sockets_) {
+            if (tcb) {
+                f(id, tcb.get());
+            }
+        }
+    }
 };
 
 #endif // TCP_FROM_SCRATCH_SOCKETTABLE_H

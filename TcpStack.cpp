@@ -17,23 +17,24 @@ TcpStack::~TcpStack() {
 
 void TcpStack::stop_() {
     is_running_ = false;
-    has_dirty_data_.notify_one();
 }
 
 uint64_t TcpStack::find_connections_tcb_(IPv4Address src_address, IPv4Address dst_address) {
     return connection_table_.find(src_address, dst_address);
 }
 
-TcpPacket TcpStack::create_writer_tcp_packet_(const TransmissionControlBlock* tcb, std::span<const uint8_t> data) noexcept {
+TcpPacket TcpStack::create_writer_tcp_packet_(const TransmissionControlBlock* tcb, std::span<const uint8_t> data, uint32_t seq_num) noexcept {
     TcpHeader header{};
     header.set_source_port(tcb->src_address.port);
     header.set_dest_port(tcb->dst_address.port);
     header.set_data_offset(5);
 
     header.set_ack(1);
-    header.set_seq_num(tcb->SND.NXT);
+    header.set_seq_num(seq_num);
     header.set_ack_num(tcb->RCV.NXT);
-    header.set_window(tcb->RCV.WND); // e.g. 65535
+
+    uint16_t free_wnd = static_cast<uint16_t>(std::min<size_t>(tcb->recv_buffer.available_capacity(), 65535));
+    header.set_window(free_wnd);
 
     TcpPacket packet{};
     packet.header = header;
@@ -53,44 +54,115 @@ void TcpStack::process_block_(uint64_t socket_id) {
         return;
     }
 
+    if (tcb->current_state != TcpState::ESTABLISHED && 
+        tcb->current_state != TcpState::CLOSE_WAIT &&
+        tcb->current_state != TcpState::FIN_WAIT_1 &&
+        tcb->current_state != TcpState::LAST_ACK) {
+        return;
+    }
+
+    // Sliding Window flow control calculation:
+    uint32_t in_flight = tcb->SND.NXT - tcb->SND.UNA;
+    uint32_t peer_wnd = tcb->SND.WND;
+
+    uint32_t usable_window = (peer_wnd > in_flight) ? (peer_wnd - in_flight) : 0;
+    if (usable_window == 0) {
+        // Window is full; wait for peer ACKs to reopen window
+        return;
+    }
+
+    size_t max_to_send = std::min<size_t>({static_cast<size_t>(usable_window), static_cast<size_t>(1460), MAX_IPV4_PACKET_SIZE});
+
     uint8_t tcp_packet_buffer[MAX_IPV4_PACKET_SIZE];
-    auto read_size = tcb->send_buffer.read({tcp_packet_buffer, MAX_IPV4_PACKET_SIZE});
+    auto read_size = tcb->send_buffer.peek({tcp_packet_buffer, max_to_send}, in_flight);
+    if (read_size == 0) {
+        return;
+    }
+
     const auto packet = create_writer_tcp_packet_(
         tcb,
-        {tcp_packet_buffer, read_size}
+        {tcp_packet_buffer, read_size},
+        tcb->SND.NXT
     );
 
     tcb->SND.NXT += read_size;
     write_packet_(tcb->src_address, tcb->dst_address, packet);
+
+    // If more unsent data remains and window permits, re-queue to keep draining
+    uint32_t new_in_flight = tcb->SND.NXT - tcb->SND.UNA;
+    if (tcb->send_buffer.size() > new_in_flight && (tcb->SND.WND > new_in_flight)) {
+        add_dirty_tcb(socket_id);
+    }
 }
 
 void TcpStack::process_dirty_blocks_() {
-    while (!dirty_socket_ids_.empty()) {
-        auto curr_id = dirty_socket_ids_.front();
-        dirty_socket_ids_.pop();
+    std::queue<uint64_t> ids_to_process;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        std::swap(ids_to_process, dirty_socket_ids_);
+    }
+
+    while (!ids_to_process.empty()) {
+        auto curr_id = ids_to_process.front();
+        ids_to_process.pop();
 
         process_block_(curr_id);
     }
 }
 
+void TcpStack::check_retransmissions_() {
+    auto now = std::chrono::system_clock::now();
+
+    socket_table_.for_each_socket([&](uint64_t /*socket_id*/, TransmissionControlBlock* tcb) {
+        if (!tcb || tcb->current_state != TcpState::ESTABLISHED) return;
+
+        uint32_t in_flight = tcb->SND.NXT - tcb->SND.UNA;
+        if (in_flight > 0 && (now - tcb->last_written >= tcb->RTO)) {
+            // Retransmit oldest unacknowledged chunk starting at offset 0 (SND.UNA)
+            size_t max_to_retransmit = std::min<size_t>({static_cast<size_t>(in_flight), static_cast<size_t>(1460), MAX_IPV4_PACKET_SIZE});
+            uint8_t tcp_packet_buffer[MAX_IPV4_PACKET_SIZE];
+
+            auto read_size = tcb->send_buffer.peek({tcp_packet_buffer, max_to_retransmit}, 0);
+            if (read_size > 0) {
+                const auto packet = create_writer_tcp_packet_(
+                    tcb,
+                    {tcp_packet_buffer, read_size},
+                    tcb->SND.UNA
+                );
+
+                tcb->last_written = now;
+                tcb->retransmit_attempts++;
+                write_packet_(tcb->src_address, tcb->dst_address, packet);
+            }
+        }
+    });
+}
+
 void TcpStack::lifecycle_() {
     while (is_running_) {
-        {
-            std::unique_lock lock(mutex);
-            has_dirty_data_.wait(lock, [this] {
-                return !dirty_socket_ids_.empty() || !is_running_;
-            });
+        bool did_work = false;
 
-            if (!is_running_) break;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (!dirty_socket_ids_.empty()) {
+                did_work = true;
+            }
         }
 
-        size_t last_size_read;
-        do {
-            // Check incoming packets each iteration in case of misses
+        if (did_work) {
             process_dirty_blocks_();
+        }
 
-            last_size_read = read_incoming_packets_();
-        } while (last_size_read > 0);
+        while (read_incoming_packets_() > 0) {
+            did_work = true;
+            process_dirty_blocks_();
+        }
+
+        check_retransmissions_();
+
+        if (!did_work) {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+        }
     }
 }
 
@@ -99,7 +171,6 @@ void TcpStack::add_dirty_tcb(uint64_t socket_id) {
     std::lock_guard<std::mutex> lock(mutex);
 
     dirty_socket_ids_.push(socket_id);
-    has_dirty_data_.notify_one();
 }
 
 uint64_t TcpStack::bind_socket(IPv4Address addr) {
@@ -129,12 +200,18 @@ size_t TcpStack::close_connection(uint64_t socket_id) {
          << " in state: " << TCP_STATE_TO_STRING(tcb->current_state);
 
     if (tcb->current_state == TcpState::ESTABLISHED) {
+        // Flush any unsent payload data before transmitting FIN
+        process_block_(socket_id);
+
         tcb->close();
         tcb->set_state(TcpState::FIN_WAIT_1);
         size_t ret = send_control_packet_(tcb, /*syn=*/0, /*ack=*/1, /*rst=*/0, /*fin=*/1, tcb->SND.NXT, tcb->RCV.NXT);
         tcb->SND.NXT++;
         return ret;
     } else if (tcb->current_state == TcpState::CLOSE_WAIT) {
+        // Flush any unsent payload data before transmitting FIN
+        process_block_(socket_id);
+
         tcb->close();
         tcb->set_state(TcpState::LAST_ACK);
         size_t ret = send_control_packet_(tcb, /*syn=*/0, /*ack=*/1, /*rst=*/0, /*fin=*/1, tcb->SND.NXT, tcb->RCV.NXT);
@@ -152,17 +229,20 @@ IPv4Address TcpStack::local_address() const noexcept {
 }
 
 uint16_t TcpStack::allocate_ephemeral_port() {
-    static uint16_t next_port = 49152;
+    static std::atomic<uint16_t> next_port{49152};
 
     for (size_t i = 0; i < 16384; ++i) {
-        uint16_t candidate = next_port++;
-        if (next_port > 65535) next_port = 49152;
+        uint16_t candidate = next_port.fetch_add(1);
+        if (candidate >= 65535 || candidate < 49152) {
+            next_port.store(49152);
+            candidate = 49152;
+        }
 
         if (!listener_table_.contains(candidate)) {
             return candidate;
         }
     }
-    return next_port++;
+    return next_port.fetch_add(1);
 }
 
 size_t TcpStack::send_control_packet_(TransmissionControlBlock* tcb, uint8_t syn, uint8_t ack, uint8_t rst, uint8_t fin,
@@ -178,7 +258,9 @@ size_t TcpStack::send_control_packet_(TransmissionControlBlock* tcb, uint8_t syn
     header.set_fin(fin);
     header.set_seq_num(seq_num);
     header.set_ack_num(ack_num);
-    header.set_window(window_size);
+
+    uint16_t free_wnd = static_cast<uint16_t>(std::min<size_t>(tcb->recv_buffer.available_capacity(), 65535));
+    header.set_window(window_size == 65535 ? free_wnd : window_size);
 
     TcpPacket packet{};
     packet.header = header;
@@ -227,6 +309,7 @@ size_t TcpStack::handle_passive_open_syn_(const IPv4Address& src, const IPv4Addr
 
         child_tcb->RCV.IRS = packet.seq_num_ntoh();
         child_tcb->RCV.NXT = child_tcb->RCV.IRS + 1;
+        child_tcb->SND.WND = packet.window_ntoh();
 
         child_tcb->SND.ISS = generate_random_uint32();
         child_tcb->SND.UNA = child_tcb->SND.ISS;
@@ -267,6 +350,7 @@ size_t TcpStack::handle_syn_sent_state_(uint64_t socket_id, const IPv4Address& s
         tcb->RCV.IRS = packet.seq_num_ntoh();
         tcb->RCV.NXT = tcb->RCV.IRS + 1;
         tcb->SND.UNA = packet.ack_num_ntoh();
+        tcb->SND.WND = packet.window_ntoh();
 
         tcb->set_state(TcpState::ESTABLISHED);
 
@@ -279,6 +363,7 @@ size_t TcpStack::handle_syn_sent_state_(uint64_t socket_id, const IPv4Address& s
 
         tcb->RCV.IRS = packet.seq_num_ntoh();
         tcb->RCV.NXT = tcb->RCV.IRS + 1;
+        tcb->SND.WND = packet.window_ntoh();
 
         tcb->set_state(TcpState::SYN_RECEIVED);
 
@@ -313,6 +398,7 @@ size_t TcpStack::handle_syn_received_state_(uint64_t socket_id, const IPv4Addres
          << ". Handshake complete! Transitioning SYN_RECEIVED -> ESTABLISHED.";
 
     tcb->SND.UNA = packet.ack_num_ntoh();
+    tcb->SND.WND = packet.window_ntoh();
     tcb->set_state(TcpState::ESTABLISHED);
 
     uint64_t listener_id = listener_table_.find(tcb->src_address.port);
@@ -342,6 +428,7 @@ size_t TcpStack::handle_established_state_(uint64_t socket_id, const TcpPacketVi
         tcb->RCV.NXT = packet.seq_num_ntoh() + 1;
         if (packet.ack()) {
             tcb->SND.NXT = packet.ack_num_ntoh();
+            tcb->SND.WND = packet.window_ntoh();
         }
 
         send_control_packet_(tcb, /*syn=*/0, /*ack=*/1, /*rst=*/0, /*fin=*/0, tcb->SND.NXT, tcb->RCV.NXT);
@@ -352,29 +439,36 @@ size_t TcpStack::handle_established_state_(uint64_t socket_id, const TcpPacketVi
         return 1;
     }
 
-    // Handle the sender getting ack
-    if (packet.ack() && packet.payload().size() == 0) {
-
-        // Set UNA
-        tcb->SND.UNA = packet.ack_num_ntoh();
+    // Handle incoming ACK (both pure ACKs and piggybacked ACKs on data packets)
+    if (packet.ack()) {
+        uint32_t ack_num = packet.ack_num_ntoh();
+        if (static_cast<int32_t>(ack_num - tcb->SND.UNA) > 0) {
+            uint32_t acked_bytes = ack_num - tcb->SND.UNA;
+            tcb->send_buffer.discard(acked_bytes);
+            tcb->SND.UNA = ack_num;
+        }
+        tcb->SND.WND = packet.window_ntoh();
 
         {
             std::unique_lock lk(tcb->state_mutex);
-
             tcb->has_recived_ack = true;
             tcb->state_cv.notify_all();
         }
 
-        return 0;
+        // If window reopened and we have pending unsent data, trigger transmission
+        uint32_t in_flight = tcb->SND.NXT - tcb->SND.UNA;
+        if (tcb->send_buffer.size() > in_flight && (tcb->SND.WND > in_flight)) {
+            add_dirty_tcb(socket_id);
+        }
     }
 
+    // Handle incoming payload data
     if (packet.payload().size() > 0) {
-
         tcb->RCV.NXT += packet.payload().size();
         tcb->recv_buffer.write(packet.payload());
 
-        // Send an ack
-        return send_control_packet_(tcb, 0, 1, 0, 0,tcb->SND.NXT, tcb->RCV.NXT);
+        // Send an ACK back
+        return send_control_packet_(tcb, 0, 1, 0, 0, tcb->SND.NXT, tcb->RCV.NXT);
     }
     return 0;
 }

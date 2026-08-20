@@ -105,40 +105,14 @@ TcpSocket TcpSocket::accept() {
     return TcpSocket{stack_, child_id};
 }
 
-size_t TcpSocket::send(std::span<const uint8_t> data, int32_t retries) const {
+size_t TcpSocket::send(std::span<const uint8_t> data, int32_t /*retries*/) const {
     auto* tcb = stack_.get_tcb(socket_id_);
     if (!tcb) return 0;
 
     auto sent_data = tcb->send_buffer.write(data);
-
-    tcb->has_recived_ack = false;
     stack_.add_dirty_tcb(socket_id_);
 
-    {
-        std::unique_lock lock(tcb->state_mutex);
-
-        auto acked = tcb->state_cv.wait_for(
-            lock,
-            tcb->RTO,
-            [&] {
-                return tcb->has_recived_ack;
-            }
-        );
-
-        if (acked) {
-            INFO << "[TcpSocket] Send data!";
-            return sent_data;
-        }
-
-    }
-
-    // Retry write
-    if (retries == 0) {
-        INFO << "[TcpSocket] Retries out!!!";
-        return 4544; // fix later
-    }
-
-    return send(data, retries - 1);
+    return sent_data;
 }
 
 size_t TcpSocket::recv(std::span<uint8_t> data) const {

@@ -90,6 +90,76 @@ public:
         return count;
     }
 
+    /** Non-blocking read; returns available bytes immediately without waiting */
+    inline size_t try_read(std::span<T> bytes) {
+        std::unique_lock<std::mutex> lock(mutex_);
+
+        if (curr_len_ == 0) {
+            return 0;
+        }
+
+        const auto available = curr_len_;
+        const auto count = std::min(bytes.size(), available);
+
+        for (size_t i = 0; i < count; ++i) {
+            bytes[i] = buffer_[read_pos_];
+
+            read_pos_ = (read_pos_ + 1) % Size;
+        }
+
+        curr_len_ -= count;
+        can_write_.notify_one();
+
+        return count;
+    }
+
+    /** Peeks bytes at offset without removing them from buffer */
+    inline size_t peek(std::span<T> bytes, size_t offset = 0) const {
+        std::unique_lock<std::mutex> lock(const_cast<std::mutex&>(mutex_));
+
+        if (offset >= curr_len_) {
+            return 0;
+        }
+
+        const auto available = curr_len_ - offset;
+        const auto count = std::min(bytes.size(), available);
+
+        size_t pos = (read_pos_ + offset) % Size;
+        for (size_t i = 0; i < count; ++i) {
+            bytes[i] = buffer_[pos];
+            pos = (pos + 1) % Size;
+        }
+
+        return count;
+    }
+
+    /** Discards count acknowledged bytes from the front of the buffer */
+    inline size_t discard(size_t count) {
+        std::unique_lock<std::mutex> lock(mutex_);
+
+        const auto to_discard = std::min(count, curr_len_);
+        read_pos_ = (read_pos_ + to_discard) % Size;
+        curr_len_ -= to_discard;
+
+        if (to_discard > 0) {
+            can_write_.notify_all();
+        }
+
+        return to_discard;
+    }
+
+    /** Returns current number of bytes stored in the buffer */
+    inline size_t size() const noexcept {
+        std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(mutex_));
+        return curr_len_;
+    }
+
+    /** Returns available free capacity in the buffer */
+    inline size_t available_capacity() const noexcept {
+        std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(mutex_));
+        return Size - curr_len_;
+    }
+
 };
 
 #endif //TCP_FROM_SCRATCH_BLOCKINGBUFFER_H

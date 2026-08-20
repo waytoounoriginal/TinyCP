@@ -105,7 +105,10 @@ struct TransmissionControlBlock {
     } RCV;
 
     /** Retransmission timeout */
-    std::chrono::milliseconds RTO{10000};
+    std::chrono::milliseconds RTO{500};
+
+    /** Number of retransmission attempts */
+    int32_t retransmit_attempts = 0;
 
     /** User timeout */
     uint64_t user_timeout = 0;

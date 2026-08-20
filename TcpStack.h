@@ -38,9 +38,6 @@ private:
 
     std::mutex mutex;
 
-    /** Used for waking the thread up when a socket writes */
-    std::condition_variable has_dirty_data_ {};
-
     /** Master owner of all TCB memory */
     SocketTable socket_table_;
 
@@ -60,11 +57,14 @@ private:
     /** Lookup socket in active connections table */
     uint64_t find_connections_tcb_(IPv4Address src_address, IPv4Address dst_address);
 
-    TcpPacket create_writer_tcp_packet_(const TransmissionControlBlock* tcb, std::span<const uint8_t> data) noexcept;
+    TcpPacket create_writer_tcp_packet_(const TransmissionControlBlock* tcb, std::span<const uint8_t> data, uint32_t seq_num) noexcept;
 
     void process_block_(uint64_t socket_id);
 
     void process_dirty_blocks_();
+
+    /** Checks and retransmits unacknowledged segments on RTO expiry */
+    void check_retransmissions_();
 
     /** The daemon thread's lifetime */
     void lifecycle_();

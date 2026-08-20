@@ -60,6 +60,54 @@ add_executable(packet_dump
 
 target_link_libraries(packet_dump PRIVATE utils)
 
+add_executable(http_client
+        http_client.cpp
+        TunDevice.cpp
+        TunDevice.h
+        IPv4Packet.h
+        IPv4Packet.cpp
+        IPv4PacketView.h
+        TcpPacket.h
+        TcpPacket.cpp
+        TcpPacketView.h
+        TcpSocket.h
+        TcpSocket.cpp
+        TcpStack.h
+        TcpStack.cpp
+        SocketTable.h
+        SocketTable.cpp
+        ListenerTable.h
+        ListenerTable.cpp
+        ConnectionTable.h
+        ConnectionTable.cpp
+        TcpPacket.cpp)
+
+target_link_libraries(http_client PRIVATE utils)
+
+add_executable(load_test
+        load_test.cpp
+        TunDevice.cpp
+        TunDevice.h
+        IPv4Packet.h
+        IPv4Packet.cpp
+        IPv4PacketView.h
+        TcpPacket.h
+        TcpPacket.cpp
+        TcpPacketView.h
+        TcpSocket.h
+        TcpSocket.cpp
+        TcpStack.h
+        TcpStack.cpp
+        SocketTable.h
+        SocketTable.cpp
+        ListenerTable.h
+        ListenerTable.cpp
+        ConnectionTable.h
+        ConnectionTable.cpp
+        TcpPacket.cpp)
+
+target_link_libraries(load_test PRIVATE utils)
+
 enable_testing()
 
 include(FetchContent)
@@ -201,6 +249,56 @@ target_include_directories(tcp_teardown_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_definitions(tcp_teardown_tests PRIVATE TCP_STACK_TESTING=1)
 target_link_libraries(tcp_teardown_tests PRIVATE gtest_main utils)
 
+add_executable(http_client_tests
+        tests/HttpClientTest.cpp
+        TcpSocket.h
+        TcpSocket.cpp
+        TcpStack.h
+        TcpStack.cpp
+        SocketTable.h
+        SocketTable.cpp
+        ListenerTable.h
+        ListenerTable.cpp
+        ConnectionTable.h
+        ConnectionTable.cpp
+        IPv4Packet.h
+        IPv4Packet.cpp
+        IPv4PacketView.h
+        TcpPacket.h
+        TcpPacket.cpp
+        TcpPacketView.h
+        TunDevice.cpp
+        TunDevice.h)
+
+target_include_directories(http_client_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(http_client_tests PRIVATE TCP_STACK_TESTING=1)
+target_link_libraries(http_client_tests PRIVATE gtest_main utils)
+
+add_executable(load_tests
+        tests/LoadTest.cpp
+        TcpSocket.h
+        TcpSocket.cpp
+        TcpStack.h
+        TcpStack.cpp
+        SocketTable.h
+        SocketTable.cpp
+        ListenerTable.h
+        ListenerTable.cpp
+        ConnectionTable.h
+        ConnectionTable.cpp
+        IPv4Packet.h
+        IPv4Packet.cpp
+        IPv4PacketView.h
+        TcpPacket.h
+        TcpPacket.cpp
+        TcpPacketView.h
+        TunDevice.cpp
+        TunDevice.h)
+
+target_include_directories(load_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(load_tests PRIVATE TCP_STACK_TESTING=1)
+target_link_libraries(load_tests PRIVATE gtest_main utils)
+
 add_test(NAME ipv4_header_tests COMMAND ipv4_header_tests)
 add_test(NAME ipv4_address_tests COMMAND ipv4_address_tests)
 add_test(NAME tcp_header_tests COMMAND tcp_header_tests)
@@ -210,3 +308,5 @@ add_test(NAME logger_tests COMMAND logger_tests)
 add_test(NAME tcp_socket_tests COMMAND tcp_socket_tests)
 add_test(NAME rfc793_scenarios_tests COMMAND rfc793_scenarios_tests)
 add_test(NAME tcp_teardown_tests COMMAND tcp_teardown_tests)
+add_test(NAME http_client_tests COMMAND http_client_tests)
+add_test(NAME load_tests COMMAND load_tests)
