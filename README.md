@@ -1,4 +1,4 @@
-# TinyCP
+# T(iny)CP
 
 > A short implementation of an userspace TCP/IP stack, strictly covering RFC 793
 
